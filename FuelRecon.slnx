@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/FuelRecon.Application/FuelRecon.Application.csproj" />
+    <Project Path="src/FuelRecon.Domain/FuelRecon.Domain.csproj" />
+    <Project Path="src/FuelRecon.Infrastructure/FuelRecon.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/FuelRecon.GoldenFiles/FuelRecon.GoldenFiles.csproj" />
+    <Project Path="tests/FuelRecon.Tests/FuelRecon.Tests.csproj" />
+  </Folder>
+</Solution>
