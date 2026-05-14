@@ -1,4 +1,3 @@
-using FluentAssertions;
 using FuelRecon.Domain;
 
 namespace FuelRecon.Tests;
@@ -25,20 +24,22 @@ public class CoreEnumsTests
     {
         foreach (var enumType in CoreEnumTypes)
         {
-            enumType.IsEnum.Should().BeTrue("{0} should be an enum", enumType.Name);
+            Assert.True(enumType.IsEnum, $"{enumType.Name} should be an enum.");
 
             foreach (var raw in Enum.GetValues(enumType))
             {
                 var value = (Enum)raw;
                 var name = Enum.GetName(enumType, value);
-                name.Should().NotBeNullOrEmpty();
 
-                value.ToString().Should().Be(name);
+                Assert.False(string.IsNullOrWhiteSpace(name));
+                Assert.Equal(name, value.ToString());
 
-                Enum.TryParse(enumType, name, ignoreCase: false, out var parsed).Should().BeTrue();
-                parsed.Should().Be(value);
+                var tryParseResult = Enum.TryParse(enumType, name, ignoreCase: false, out var parsed);
+                Assert.True(tryParseResult);
+                Assert.Equal(value, parsed);
 
-                Enum.Parse(enumType, name!, ignoreCase: false).Should().Be(value);
+                var parsedViaParse = Enum.Parse(enumType, name!, ignoreCase: false);
+                Assert.Equal(value, parsedViaParse);
             }
         }
     }
@@ -46,40 +47,49 @@ public class CoreEnumsTests
     [Fact]
     public void ReconciliationStatus_matches_documented_item_statuses()
     {
-        Enum.GetNames<ReconciliationStatus>().Should().Equal(
-            nameof(ReconciliationStatus.Matched),
-            nameof(ReconciliationStatus.Unbilled),
-            nameof(ReconciliationStatus.Variance),
-            nameof(ReconciliationStatus.DuplicatePossible),
-            nameof(ReconciliationStatus.MissingRA),
-            nameof(ReconciliationStatus.RegoMismatch),
-            nameof(ReconciliationStatus.SupplierOnly),
-            nameof(ReconciliationStatus.CarsOnly),
-            nameof(ReconciliationStatus.ReviewRequired));
+        Assert.Equal(
+            [
+                nameof(ReconciliationStatus.Matched),
+                nameof(ReconciliationStatus.Unbilled),
+                nameof(ReconciliationStatus.Variance),
+                nameof(ReconciliationStatus.DuplicatePossible),
+                nameof(ReconciliationStatus.MissingRA),
+                nameof(ReconciliationStatus.RegoMismatch),
+                nameof(ReconciliationStatus.SupplierOnly),
+                nameof(ReconciliationStatus.CarsOnly),
+                nameof(ReconciliationStatus.ReviewRequired),
+            ],
+            Enum.GetNames<ReconciliationStatus>());
     }
 
     [Fact]
     public void ValidationSeverity_includes_info_warning_error()
     {
-        Enum.GetNames<ValidationSeverity>().Should().Equal(
-            nameof(ValidationSeverity.Info),
-            nameof(ValidationSeverity.Warning),
-            nameof(ValidationSeverity.Error));
+        Assert.Equal(
+            [
+                nameof(ValidationSeverity.Info),
+                nameof(ValidationSeverity.Warning),
+                nameof(ValidationSeverity.Error),
+            ],
+            Enum.GetNames<ValidationSeverity>());
     }
 
     [Fact]
     public void MappingResultState_matches_mapping_template_states()
     {
-        Enum.GetNames<MappingResultState>().Should().Equal(
-            nameof(MappingResultState.AutoMapped),
-            nameof(MappingResultState.TemplateMapped),
-            nameof(MappingResultState.ManualMapped),
-            nameof(MappingResultState.IncompleteMapping));
+        Assert.Equal(
+            [
+                nameof(MappingResultState.AutoMapped),
+                nameof(MappingResultState.TemplateMapped),
+                nameof(MappingResultState.ManualMapped),
+                nameof(MappingResultState.IncompleteMapping),
+            ],
+            Enum.GetNames<MappingResultState>());
     }
 
     [Fact]
     public void InputSlot_has_three_slots_for_period_imports()
     {
-        Enum.GetValues<InputSlot>().Should().HaveCount(3);
+        Assert.Equal(3, Enum.GetValues<InputSlot>().Length);
     }
 }
