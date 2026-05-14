@@ -1,0 +1,11 @@
+namespace FuelRecon.Domain;
+
+/// <summary>
+/// Severity for file-level or row-level validation outcomes.
+/// </summary>
+public enum ValidationSeverity
+{
+    Info = 0,
+    Warning = 1,
+    Error = 2,
+}
