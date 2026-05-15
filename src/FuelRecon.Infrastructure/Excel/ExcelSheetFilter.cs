@@ -26,4 +26,28 @@ public static class ExcelSheetFilter
                 || compact.EndsWith("scratch", StringComparison.Ordinal),
         };
     }
+
+    /// <summary>
+    /// Cars+ exports sometimes land on a worksheet named "scratch"; still skip obvious summary tabs.
+    /// </summary>
+    public static bool IsNonDataSheetForCarsBilling(string? sheetName)
+    {
+        if (string.IsNullOrWhiteSpace(sheetName))
+        {
+            return false;
+        }
+
+        var compact = ExcelColumnHeaderMatcher.Normalise(sheetName);
+        if (compact.Length == 0)
+        {
+            return false;
+        }
+
+        return compact switch
+        {
+            "notes" or "note" or "summary" or "totals" or "total" => true,
+            _ => compact.EndsWith("summary", StringComparison.Ordinal)
+                || compact.EndsWith("totals", StringComparison.Ordinal),
+        };
+    }
 }

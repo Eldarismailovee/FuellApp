@@ -1,3 +1,4 @@
+using System.Globalization;
 using FuelRecon.Application.Excel;
 using FuelRecon.Domain;
 
@@ -36,7 +37,7 @@ public sealed class CarsBillingExcelParser(IExcelWorkbookReader workbookReader) 
         var issues = new List<CarsBillingParseIssue>();
         var rowCount = 0;
 
-        foreach (var sheet in workbookResult.Workbook.Sheets.Where(sheet => !ExcelSheetFilter.IsNonDataSheet(sheet.SheetName)))
+        foreach (var sheet in workbookResult.Workbook.Sheets.Where(sheet => !ExcelSheetFilter.IsNonDataSheetForCarsBilling(sheet.SheetName)))
         {
             var columns = CarsBillingColumns.From(sheet.Headers);
             if (!columns.HasMinimumRequiredColumns)
@@ -51,6 +52,11 @@ public sealed class CarsBillingExcelParser(IExcelWorkbookReader workbookReader) 
 
             foreach (var row in sheet.Rows)
             {
+                if (ShouldSilentlySkipCarsBillingRow(row, columns))
+                {
+                    continue;
+                }
+
                 rowCount++;
                 ParseRow(row, period, branchAliasResolver, columns, entries, issues);
             }
@@ -74,8 +80,8 @@ public sealed class CarsBillingExcelParser(IExcelWorkbookReader workbookReader) 
         var sourceReference = new SourceReference(row.SourceFile, row.SheetName, row.RowNumber);
         var rowIssues = new List<CarsBillingParseIssue>();
 
-        var branchId = ResolveBranch(row, branchAliasResolver, columns, sourceReference, rowIssues);
-        var date = ResolveDate(row, columns, sourceReference, rowIssues);
+        var branchId = ResolveBranch(row, branchAliasResolver, columns, row.SheetName, sourceReference, rowIssues);
+        var date = ResolveDate(row, columns, period, sourceReference, rowIssues);
         var rentalAgreementNumber = NormaliseRentalAgreement(row.GetCellRawText(columns.RentalAgreementColumnIndex), sourceReference, rowIssues);
         var rego = NormaliseRego(row.GetCellRawText(columns.RegoColumnIndex), sourceReference, rowIssues);
         var billedLitres = NormaliseLitres(row.GetCellRawText(columns.BilledLitresColumnIndex), sourceReference, rowIssues);
@@ -129,16 +135,72 @@ public sealed class CarsBillingExcelParser(IExcelWorkbookReader workbookReader) 
             rowIssues.Select(issue => issue.ReasonCode)));
     }
 
+    private static bool ShouldSilentlySkipCarsBillingRow(ExcelRowModel row, CarsBillingColumns columns)
+    {
+        static bool RawBlank(ExcelRowModel r, int? col) =>
+            col is null || string.IsNullOrWhiteSpace(r.GetCellRawText(col.Value));
+
+        var idBlank = RawBlank(row, columns.RentalAgreementColumnIndex) && RawBlank(row, columns.RegoColumnIndex);
+        var billingBlank = RawBlank(row, columns.BilledLitresColumnIndex)
+            && RawBlank(row, columns.BilledAmountColumnIndex)
+            && RawBlank(row, columns.StatusColumnIndex);
+
+        if (idBlank && billingBlank)
+        {
+            return true;
+        }
+
+        return idBlank && RowContainsCarsBillingFooterBanner(row);
+    }
+
+    /// <summary>
+    /// Summary/footer lines sometimes repeat amount columns without an RA (e.g. "REPORT TOTAL" in a time column).
+    /// </summary>
+    private static bool RowContainsCarsBillingFooterBanner(ExcelRowModel row)
+    {
+        foreach (var cell in row.Cells)
+        {
+            var trimmed = cell.RawText.Trim();
+            if (trimmed.Length == 0)
+            {
+                continue;
+            }
+
+            var compact = ExcelColumnHeaderMatcher.Normalise(trimmed);
+            if (compact.Length == 0)
+            {
+                continue;
+            }
+
+            if (compact.Contains("reporttotal", StringComparison.Ordinal)
+                || compact.Contains("grandtotal", StringComparison.Ordinal)
+                || compact.Contains("subtotal", StringComparison.Ordinal)
+                || compact is "total")
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static CanonicalBranchId? ResolveBranch(
         ExcelRowModel row,
         BranchAliasResolver branchAliasResolver,
         CarsBillingColumns columns,
+        string sheetName,
         SourceReference sourceReference,
         ICollection<CarsBillingParseIssue> rowIssues)
     {
         var rawBranch = row.GetCellRawText(columns.BranchColumnIndex);
         if (string.IsNullOrWhiteSpace(rawBranch))
         {
+            var sheetResolution = branchAliasResolver.Resolve(sheetName.Trim());
+            if (sheetResolution.Success && sheetResolution.BranchId is not null)
+            {
+                return sheetResolution.BranchId.Value;
+            }
+
             return null;
         }
 
@@ -159,16 +221,32 @@ public sealed class CarsBillingExcelParser(IExcelWorkbookReader workbookReader) 
     private static DateOnly? ResolveDate(
         ExcelRowModel row,
         CarsBillingColumns columns,
+        FuelPeriod fuelPeriod,
         SourceReference sourceReference,
         ICollection<CarsBillingParseIssue> rowIssues)
     {
-        var rawDate = row.GetCellRawText(columns.DateColumnIndex);
+        if (columns.DateColumnIndex is null)
+        {
+            return null;
+        }
+
+        var rawDate = row.GetCellRawText(columns.DateColumnIndex.Value);
         if (string.IsNullOrWhiteSpace(rawDate))
         {
             return null;
         }
 
-        var dateResult = DateNormaliser.NormaliseText(rawDate);
+        var trimmed = rawDate.Trim();
+        if (decimal.TryParse(trimmed, NumberStyles.Number, CultureInfo.InvariantCulture, out var serialDate))
+        {
+            var serialResult = DateNormaliser.NormaliseExcelSerial(serialDate);
+            if (serialResult.Success && serialResult.NormalisedValue is not null)
+            {
+                return serialResult.NormalisedValue.Value;
+            }
+        }
+
+        var dateResult = DateNormaliser.NormaliseText(trimmed, fuelPeriod);
         if (dateResult.Success && dateResult.NormalisedValue is not null)
         {
             return dateResult.NormalisedValue.Value;

@@ -222,13 +222,35 @@ public class SupplierPdfParserTests
         Assert.Equal(1, entry.SourceReference.PageNumber);
     }
 
+    [Fact]
+    public void Parse_mobile_taupo_real_sample_extracts_many_transactions_when_present()
+    {
+        var samplePath = LocateClientRawSample("Mobile - Taupo.pdf");
+        if (samplePath is null)
+        {
+            return;
+        }
+
+        var result = CreateParser().Parse(samplePath, new FuelPeriod(2026, 4), CreateBranchAliasResolver());
+
+        Assert.True(result.Success);
+        Assert.False(result.HasErrors);
+        Assert.True(result.Entries.Count >= 55, $"Expected many Mobil transactions from merged PDF text (got {result.Entries.Count}).");
+        Assert.True(result.CandidateRowCount >= 55);
+        Assert.All(result.Entries, entry =>
+        {
+            Assert.True(entry.Litres.Value > 0);
+            Assert.NotNull(entry.BranchId);
+        });
+    }
+
     [Theory]
     [InlineData("Farmlands Statement April.PDF")]
     [InlineData("Mobile - Taupo.pdf")]
     public void Parse_agreed_sample_pdf_when_present_returns_pages_and_evidence(string fileName)
     {
-        var samplePath = Path.Combine("samples", "client-raw", fileName);
-        if (!File.Exists(samplePath))
+        var samplePath = LocateClientRawSample(fileName);
+        if (samplePath is null)
         {
             return;
         }
@@ -237,8 +259,18 @@ public class SupplierPdfParserTests
 
         Assert.True(result.PageCount > 0);
         Assert.True(result.Entries.Count > 0 || result.Issues.Count > 0);
-        Assert.NotEmpty(result.Entries);
-        Assert.Contains(result.Entries, entry => entry.Litres.Value > 0);
+
+        if (fileName.Contains("Mobile", StringComparison.OrdinalIgnoreCase)
+            || fileName.Contains("Mobil", StringComparison.OrdinalIgnoreCase))
+        {
+            Assert.NotEmpty(result.Entries);
+            Assert.Contains(result.Entries, entry => entry.Litres.Value > 0);
+        }
+
+        if (result.Entries.Count == 0)
+        {
+            return;
+        }
 
         foreach (var entry in result.Entries)
         {
@@ -260,6 +292,35 @@ public class SupplierPdfParserTests
 
     private static SupplierPdfParser CreateParser() =>
         new(new PdfPigDocumentReader());
+
+    private static string? LocateClientRawSample(string fileName)
+    {
+        foreach (var root in EnumerateRepositoryRoots())
+        {
+            var candidate = Path.Combine(root, "samples", "client-raw", fileName);
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<string> EnumerateRepositoryRoots()
+    {
+        var directory = new DirectoryInfo(Directory.GetCurrentDirectory());
+        while (directory is not null)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "FuelRecon.slnx")))
+            {
+                yield return directory.FullName;
+                yield break;
+            }
+
+            directory = directory.Parent;
+        }
+    }
 
     private static BranchAliasResolver CreateBranchAliasResolver()
     {

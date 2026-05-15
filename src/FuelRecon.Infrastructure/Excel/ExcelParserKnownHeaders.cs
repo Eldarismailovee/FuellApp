@@ -98,6 +98,8 @@ internal static class ExcelParserKnownHeaders
         internal static readonly string[] Date =
         [
             "Date",
+            "Date In",
+            "Date Out",
             "Billing Date",
             "Transaction Date",
             "Period",
@@ -108,10 +110,12 @@ internal static class ExcelParserKnownHeaders
         internal static readonly string[] RentalAgreement =
         [
             "RA",
+            "RA Number",
             "Rental Agreement",
             "Rental Agreement Number",
             "Agreement",
             "Agreement No",
+            "Agreement Number",
             "Contract",
         ];
 
@@ -141,6 +145,8 @@ internal static class ExcelParserKnownHeaders
             "Billed Amount",
             "Charge",
             "Total",
+            "Fuel Charges",
+            "Fuel Charge",
             "Inc GST",
             "Incl GST",
         ];
@@ -151,6 +157,9 @@ internal static class ExcelParserKnownHeaders
             "Billing Status",
             "Invoice Status",
             "Bill Status",
+            "Fuel",
+            "Fuel Code",
+            "Charge Code",
         ];
 
     }

@@ -35,7 +35,7 @@ public class ExcelRealSampleParserSmokeTests
         {
             var result = new CarsBillingExcelParser(reader).Parse(path, period, resolver);
             Assert.True(result.RowCount > 0);
-            Assert.True(result.Entries.Count > 0 || result.Issues.Count > 0);
+            Assert.True(result.Entries.Count > 0);
         }
     }
 

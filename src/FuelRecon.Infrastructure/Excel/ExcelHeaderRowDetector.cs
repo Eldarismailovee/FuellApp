@@ -42,6 +42,9 @@ internal static class ExcelHeaderRowDetector
     {
         var scanEnd = Math.Min(lastRowNumber, firstRowNumber + MaxRowsToScan - 1);
 
+        int? bestScoredRow = null;
+        var bestScore = int.MinValue;
+
         for (var rowNumber = firstRowNumber; rowNumber <= scanEnd; rowNumber++)
         {
             var texts = ReadRowCellTexts(worksheet, rowNumber, firstColumnNumber, lastColumnNumber);
@@ -49,9 +52,62 @@ internal static class ExcelHeaderRowDetector
             {
                 return rowNumber;
             }
+
+            var score = ScoreCarsBillingHeaderCandidate(texts);
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestScoredRow = rowNumber;
+            }
         }
 
-        return null;
+        return bestScore >= 35 ? bestScoredRow : null;
+    }
+
+    private static int ScoreCarsBillingHeaderCandidate(IReadOnlyList<string> cellTexts)
+    {
+        var score = 0;
+
+        if (RowMatchesAnyAlias(cellTexts, ExcelParserKnownHeaders.CarsBilling.RentalAgreement))
+        {
+            score += 22;
+        }
+
+        if (RowMatchesAnyAlias(cellTexts, ExcelParserKnownHeaders.CarsBilling.Rego))
+        {
+            score += 22;
+        }
+
+        if (RowMatchesAnyAlias(cellTexts, ExcelParserKnownHeaders.CarsBilling.BilledLitres))
+        {
+            score += 15;
+        }
+
+        if (RowMatchesAnyAlias(cellTexts, ExcelParserKnownHeaders.CarsBilling.BilledAmount))
+        {
+            score += 15;
+        }
+
+        if (RowMatchesAnyAlias(cellTexts, ExcelParserKnownHeaders.CarsBilling.Status))
+        {
+            score += 12;
+        }
+
+        if (RowMatchesAnyAlias(cellTexts, ExcelParserKnownHeaders.CarsBilling.Date))
+        {
+            score += 12;
+        }
+
+        foreach (var cellText in cellTexts)
+        {
+            var cellKey = ExcelColumnHeaderMatcher.Normalise(cellText);
+            if (cellKey.Length > 0 && decimal.TryParse(cellKey, out _))
+            {
+                score -= 4;
+            }
+        }
+
+        return score;
     }
 
     private static int ScoreBranchLitresRow(IReadOnlyList<string> cells)

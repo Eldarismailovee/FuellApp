@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Text;
 using System.Text.RegularExpressions;
 using FuelRecon.Application.Pdf;
 using FuelRecon.Domain;
@@ -56,9 +57,10 @@ public sealed partial class SupplierPdfParser(IPdfDocumentReader documentReader)
 
         var seenFarmlandsKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var page in readResult.Document.Pages)
+        if (supplierName.Equals("Mobil", StringComparison.OrdinalIgnoreCase))
         {
-            foreach (var candidate in ExtractCandidateRows(page, supplierName))
+            var mobilLayout = MobilDocumentLayout.Build(readResult.Document.Pages);
+            foreach (var (candidate, page) in ExtractMobilCandidatesFromDocument(mobilLayout))
             {
                 candidateRowCount++;
                 ParseCandidateLine(
@@ -72,13 +74,32 @@ public sealed partial class SupplierPdfParser(IPdfDocumentReader documentReader)
                     seenFarmlandsKeys);
             }
         }
+        else
+        {
+            foreach (var page in readResult.Document.Pages)
+            {
+                foreach (var candidate in ExtractCandidateRows(page, supplierName))
+                {
+                    candidateRowCount++;
+                    ParseCandidateLine(
+                        candidate,
+                        page,
+                        period,
+                        supplierName,
+                        branchAliasResolver,
+                        entries,
+                        issuesList,
+                        seenFarmlandsKeys);
+                }
+            }
+        }
 
         if (candidateRowCount == 0)
         {
             issuesList.AddRange(readResult.Document.Pages.Select(page => new SupplierPdfParseIssue(
                 ValidationSeverity.Warning,
                 SupplierRowNotParsedReasonCode,
-                "No transaction-like rows were found on the recognised supplier statement page.",
+                "No transaction-like rows were found on the recognised supplier statement.",
                 new SourceReference(page.SourceFile, pageNumber: page.PageNumber))));
         }
 
@@ -305,9 +326,7 @@ public sealed partial class SupplierPdfParser(IPdfDocumentReader documentReader)
     private static IReadOnlyList<SupplierPdfCandidate> ExtractCandidateRows(PdfPageModel page, string supplierName)
     {
         var pageText = NormaliseText(page.Text);
-        var candidates = supplierName.Equals("Mobil", StringComparison.OrdinalIgnoreCase)
-            ? ExtractMobilCandidates(pageText)
-            : ExtractFarmlandsCandidates(pageText);
+        var candidates = ExtractFarmlandsCandidates(pageText);
 
         if (candidates.Count > 0)
         {
@@ -346,56 +365,281 @@ public sealed partial class SupplierPdfParser(IPdfDocumentReader documentReader)
         return segments;
     }
 
-    private static IReadOnlyList<SupplierPdfCandidate> ExtractMobilCandidates(string pageText)
+    private sealed class MobilDocumentLayout
     {
-        var normalisedPageText = NormaliseMobilPageText(pageText);
-        var mobilRuns = SplitMobilTransactionalRuns(normalisedPageText);
-        var candidates = new List<SupplierPdfCandidate>();
-        var cardMatches = MobilCardholderPattern().Matches(normalisedPageText);
-
-        if (cardMatches.Count == 0)
+        private MobilDocumentLayout(
+            string combinedText,
+            IReadOnlyList<(int Start, PdfPageModel Page)> spans,
+            IReadOnlyList<PdfPageModel> pages)
         {
-            foreach (var run in mobilRuns)
+            CombinedText = combinedText;
+            _spans = spans;
+            Pages = pages;
+        }
+
+        public string CombinedText { get; }
+
+        public IReadOnlyList<PdfPageModel> Pages { get; }
+
+        private readonly IReadOnlyList<(int Start, PdfPageModel Page)> _spans;
+
+        public PdfPageModel PageForIndex(int indexInCombined)
+        {
+            for (var i = _spans.Count - 1; i >= 0; i--)
             {
-                foreach (var segment in ExtractSupplierDateAnchoredSegments(run))
+                if (indexInCombined >= _spans[i].Start)
                 {
-                    candidates.Add(new SupplierPdfCandidate(segment));
+                    return _spans[i].Page;
                 }
             }
 
-            return candidates.Count > 0 ? candidates : ExtractFarmlandsCandidates(normalisedPageText);
+            return _spans[0].Page;
         }
 
-        for (var cardIndex = 0; cardIndex < cardMatches.Count; cardIndex++)
+        public static MobilDocumentLayout Build(IReadOnlyList<PdfPageModel> pages)
+        {
+            var spans = new List<(int Start, PdfPageModel Page)>();
+            var builder = new StringBuilder();
+
+            for (var i = 0; i < pages.Count; i++)
+            {
+                spans.Add((builder.Length, pages[i]));
+                if (i > 0)
+                {
+                    builder.Append('\n');
+                }
+
+                builder.Append(
+                    SanitizePdfControlCharacters(NormaliseMobilPageText(NormaliseText(pages[i].Text))));
+            }
+
+            return new MobilDocumentLayout(builder.ToString(), spans, pages);
+        }
+    }
+
+    /// <summary>
+    /// Mobil statements span multiple pages with "Continued from previous page" blocks that omit a repeated CARD header.
+    /// Concatenate pages before splitting so continuation rows stay inside the correct cardholder section.
+    /// </summary>
+    private static IEnumerable<(SupplierPdfCandidate Candidate, PdfPageModel Page)> ExtractMobilCandidatesFromDocument(
+        MobilDocumentLayout layout)
+    {
+        var combinedText = layout.CombinedText;
+        var candidates = ExtractMobilCandidateEntries(combinedText);
+
+        if (candidates.Count > 0)
+        {
+            foreach (var (candidate, startIndex) in candidates)
+            {
+                yield return (candidate, layout.PageForIndex(startIndex));
+            }
+
+            yield break;
+        }
+
+        foreach (var page in layout.Pages)
+        {
+            foreach (var line in page.Lines.Where(IsCandidateLine))
+            {
+                yield return (new SupplierPdfCandidate(line), page);
+            }
+        }
+    }
+
+    private static List<(SupplierPdfCandidate Candidate, int StartIndex)> ExtractMobilCandidateEntries(string combinedText)
+    {
+        var results = new List<(SupplierPdfCandidate Candidate, int StartIndex)>();
+        var cardMatches = MobilCardholderPattern().Matches(combinedText).Cast<Match>().ToArray();
+
+        void ProcessSection(int absoluteStart, int absoluteEnd, bool cardholderSection, string? siteText, string? cardholder)
+        {
+            if (absoluteEnd <= absoluteStart)
+            {
+                return;
+            }
+
+            var sectionText = combinedText[absoluteStart..absoluteEnd];
+            foreach (var (runChunk, runOffsetInSection) in SplitMobilTransactionalRunsWithOffsets(sectionText))
+            {
+                foreach (var (segment, segmentOffsetInRun) in ExtractMobilDateAnchoredSegmentsWithOffsets(runChunk, cardholderSection))
+                {
+                    var absoluteIndex = absoluteStart + runOffsetInSection + segmentOffsetInRun;
+                    results.Add((
+                        new SupplierPdfCandidate(segment, SiteText: siteText, CardholderText: cardholder),
+                        absoluteIndex));
+                }
+            }
+        }
+
+        if (cardMatches.Length == 0)
+        {
+            ProcessSection(0, combinedText.Length, cardholderSection: false, siteText: null, cardholder: null);
+            return results;
+        }
+
+        var leaderLength = cardMatches[0].Index;
+        if (leaderLength > 0)
+        {
+            ProcessSection(0, leaderLength, cardholderSection: false, siteText: null, cardholder: null);
+        }
+
+        for (var cardIndex = 0; cardIndex < cardMatches.Length; cardIndex++)
         {
             var cardMatch = cardMatches[cardIndex];
             var sectionStart = cardMatch.Index + cardMatch.Length;
-            var sectionEnd = cardIndex + 1 < cardMatches.Count ? cardMatches[cardIndex + 1].Index : normalisedPageText.Length;
-            var section = normalisedPageText[sectionStart..sectionEnd];
+            var sectionEnd = cardIndex + 1 < cardMatches.Length ? cardMatches[cardIndex + 1].Index : combinedText.Length;
             var cardholder = cardMatch.Groups["name"].Value.Trim();
             var siteText = MobilCardholderSuffixPattern().Replace(cardholder, string.Empty).Trim();
 
-            foreach (var run in SplitMobilTransactionalRuns(section))
-            {
-                foreach (var segment in ExtractSupplierDateAnchoredSegments(run))
-                {
-                    candidates.Add(new SupplierPdfCandidate(segment, SiteText: siteText, CardholderText: cardholder));
-                }
-            }
+            ProcessSection(sectionStart, sectionEnd, cardholderSection: true, siteText, cardholder);
         }
 
-        return candidates.Count > 0 ? candidates : ExtractFarmlandsCandidates(normalisedPageText);
+        return results;
     }
+
+    private static IEnumerable<(string Segment, int StartOffset)> ExtractMobilDateAnchoredSegmentsWithOffsets(
+        string text,
+        bool cardholderSection)
+    {
+        var matches = MobilTransactionDateAnchorPattern().Matches(text);
+        for (var index = 0; index < matches.Count; index++)
+        {
+            var start = matches[index].Index;
+            var end = index + 1 < matches.Count ? matches[index + 1].Index : text.Length;
+            var segment = text[start..end].Trim();
+            if (!ShouldDiscardMobilNoiseSegment(segment, cardholderSection))
+            {
+                yield return (segment, start);
+            }
+        }
+    }
+
+    private static bool ShouldDiscardMobilNoiseSegment(string segment, bool cardholderSection)
+    {
+        var compact = WhitespacePattern().Replace(segment, " ");
+        if (compact.Length < 14)
+        {
+            return true;
+        }
+
+        if (compact.Contains("Payment Advice", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (compact.Contains("Account Summary by Cardholder", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (compact.Contains("Closing balance", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (compact.Contains("Payment received", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (compact.Contains("Direct Debit", StringComparison.OrdinalIgnoreCase)
+            || compact.Contains("will be Direct Debited", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (compact.Contains("DETACH HERE", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (compact.Contains("Transaction activity (see attached)", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (compact.Contains("Unused Mobilcard", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (compact.Contains("Sub Totals", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (compact.Contains("Card No:", StringComparison.OrdinalIgnoreCase)
+            && !compact.Contains("Synergy", StringComparison.OrdinalIgnoreCase)
+            && !compact.Contains("Diesel", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (compact.StartsWith("N = National Price", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (compact.Contains("Continued from previous page", StringComparison.OrdinalIgnoreCase)
+            && !MobilTransactionDateAnchorPattern().IsMatch(segment))
+        {
+            return true;
+        }
+
+        if (compact.Contains("Continued over page", StringComparison.OrdinalIgnoreCase)
+            && !MobilTransactionDateAnchorPattern().IsMatch(segment))
+        {
+            return true;
+        }
+
+        if (compact.Contains("TOTAL CHARGES DUE", StringComparison.OrdinalIgnoreCase)
+            && !MobilLitresDigitDotDigitLBeforeLetterPattern().IsMatch(segment)
+            && !LitresPattern().IsMatch(segment))
+        {
+            return true;
+        }
+
+        if (TotalChargesSummaryPattern().IsMatch(compact))
+        {
+            return true;
+        }
+
+        var hasLitres = MobilLitresDigitDotDigitLBeforeLetterPattern().IsMatch(segment)
+            || LitresPattern().IsMatch(segment)
+            || MobilInlineQuantityPattern().IsMatch(segment);
+
+        if (!hasLitres)
+        {
+            return true;
+        }
+
+        var hasFuelContext = MobilBrandWordPattern().IsMatch(compact)
+            || compact.Contains("Synergy", StringComparison.OrdinalIgnoreCase)
+            || compact.Contains("Diesel", StringComparison.OrdinalIgnoreCase)
+            || compact.Contains("Unleaded", StringComparison.OrdinalIgnoreCase)
+            || compact.Contains("Petrol", StringComparison.OrdinalIgnoreCase)
+            || compact.Contains("Efficient", StringComparison.OrdinalIgnoreCase);
+
+        if (!hasFuelContext && !cardholderSection)
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string SanitizePdfControlCharacters(string text) =>
+        PdfControlCharactersPattern().Replace(text, " ");
 
     /// <summary>
     /// Splits Mobil blobs where multiple DD/MM/YYYY rows were flattened into a single PDF text run without line breaks.
     /// </summary>
-    private static IEnumerable<string> SplitMobilTransactionalRuns(string text)
+    private static IEnumerable<(string Chunk, int StartOffset)> SplitMobilTransactionalRunsWithOffsets(string text)
     {
         var matches = MobilBlobSegmentBoundaryPattern().Matches(text);
         if (matches.Count <= 1)
         {
-            yield return text;
+            yield return (text, 0);
             yield break;
         }
 
@@ -403,10 +647,10 @@ public sealed partial class SupplierPdfParser(IPdfDocumentReader documentReader)
         {
             var start = matches[index].Index;
             var end = index + 1 < matches.Count ? matches[index + 1].Index : text.Length;
-            var chunk = text[start..end].Trim();
-            if (chunk.Length > 0)
+            var chunk = text[start..end];
+            if (!string.IsNullOrWhiteSpace(chunk))
             {
-                yield return chunk;
+                yield return (chunk, start);
             }
         }
     }
@@ -605,11 +849,22 @@ public sealed partial class SupplierPdfParser(IPdfDocumentReader documentReader)
     private static partial Regex MobilLitresDigitDotDigitLBeforeLetterPattern();
 
     /// <summary>
-    /// Mobil transaction boundaries: merged dd/MM/yyHH:mm (terminated with (?!\d) when minutes are glued to site text),
-    /// four-digit slash years with (?!:\d{2}\b) so 02/04/2612:56 is not split as year 2612, or dd/MM/yy without HH:mm.
+    /// Mobil transaction boundaries (amount totals often end with a digit immediately before the next dd/MM/yyHH:mm).
     /// </summary>
-    [GeneratedRegex(@"\b\d{1,2}/\d{1,2}/\d{2}\d{2}:\d{2}(?!\d)|\b\d{1,2}/\d{1,2}/\d{4}\b(?!:\d{2}\b)|\b\d{1,2}/\d{1,2}/\d{2}(?!\d{2}:)", RegexOptions.None)]
+    [GeneratedRegex(@"\d{1,2}/\d{1,2}/\d{2}\d{2}:\d{2}(?!\d)|\d{1,2}/\d{1,2}/\d{4}\b(?!:\d{2}\b)|\d{1,2}/\d{1,2}/\d{2}(?!\d{2}:)", RegexOptions.None)]
     private static partial Regex MobilBlobSegmentBoundaryPattern();
+
+    [GeneratedRegex(@"\bMobil\b", RegexOptions.IgnoreCase)]
+    private static partial Regex MobilBrandWordPattern();
+
+    [GeneratedRegex(@"\d{1,2}/\d{1,2}/\d{2}\d{2}:\d{2}(?!\d)|\d{1,2}[/-]\d{1,2}[/-]\d{4}\b(?!:\d{2}\b)|\d{1,2}[/-]\d{1,2}[/-]\d{2}(?!\d{2}:)", RegexOptions.IgnoreCase)]
+    private static partial Regex MobilTransactionDateAnchorPattern();
+
+    [GeneratedRegex(@"Total\$\d", RegexOptions.IgnoreCase)]
+    private static partial Regex TotalChargesSummaryPattern();
+
+    [GeneratedRegex(@"[\x00-\x08\x0B\x0C\x0E-\x1F\u007F]", RegexOptions.None)]
+    private static partial Regex PdfControlCharactersPattern();
 
     [GeneratedRegex(@"\b\d{1,2}/\d{1,2}/\d{2}\d{2}:\d{2}(?!\d)|\b\d{1,2}[/-]\d{1,2}[/-]\d{4}\b(?!:\d{2}\b)|\b\d{1,2}[/-]\d{1,2}[/-]\d{2}(?!\d{2}:)|\b\d{1,2}\s+[A-Za-z]{3,9}\s+\d{2,4}\b", RegexOptions.IgnoreCase)]
     private static partial Regex SupplierDatePattern();
@@ -641,7 +896,7 @@ public sealed partial class SupplierPdfParser(IPdfDocumentReader documentReader)
     [GeneratedRegex(@"CARD\s+(?:NUMBER|NO\.?)\s*:\s*\S+\s+NAME:\s*(?<name>.*?)(?=\s+\d{1,2}[/-]\d{1,2}[/-]\d{4}\b(?!:\d{2}\b)|\s+\d{1,2}/\d{1,2}/\d{2}\d{2}:\d{2}(?!\d)|\s+\d{1,2}\s+[A-Za-z]{3,9}\s+\d{2,4}\b|$)", RegexOptions.IgnoreCase)]
     private static partial Regex MobilCardholderPattern();
 
-    [GeneratedRegex(@"\s+\d+/\d+$")]
+    [GeneratedRegex(@"\s+(?:\d+/\d+|\d+)$")]
     private static partial Regex MobilCardholderSuffixPattern();
 
     [GeneratedRegex(@"\b\d{5,}\b")]

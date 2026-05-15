@@ -7,6 +7,25 @@ namespace FuelRecon.Tests;
 public class CarsBillingExcelParserTests
 {
     [Fact]
+    public void Parse_reads_client_cars_plus_statement_sample_when_present()
+    {
+        var path = Path.Combine("samples", "client-raw", "cars+ statement.xlsx");
+        if (!File.Exists(path))
+        {
+            return;
+        }
+
+        var result = CreateParser().Parse(path, new FuelPeriod(2026, 4), CreateSampleBranchAliasResolver());
+
+        Assert.True(result.Success);
+        Assert.True(result.RowCount > 0);
+        Assert.True(result.Entries.Count > 0);
+        Assert.All(result.Entries, entry => Assert.NotNull(entry.RentalAgreementNumber));
+        Assert.Contains(result.Entries, entry => entry.BilledAmount is not null);
+        Assert.Contains(result.Entries, entry => entry.BillingStatus is not null);
+    }
+
+    [Fact]
     public void Parse_reads_valid_cars_billing_rows_and_maps_branch_aliases()
     {
         using var tempFile = TemporaryExcelFile.Create();
@@ -67,6 +86,61 @@ public class CarsBillingExcelParserTests
         Assert.Equal(10.25m, second.BilledLitres?.Value);
         Assert.Null(second.BilledAmount);
         Assert.Equal("Open", second.BillingStatus);
+    }
+
+    [Fact]
+    public void Parse_resolves_branch_from_sheet_name_when_branch_column_is_missing()
+    {
+        using var tempFile = TemporaryExcelFile.Create();
+        using (var workbook = new XLWorkbook())
+        {
+            var sheet = workbook.Worksheets.Add("Taupo");
+            sheet.Cell(1, 1).Value = "RA Number";
+            sheet.Cell(1, 2).Value = "Date In";
+            sheet.Cell(1, 3).Value = "Fuel Charges";
+            sheet.Cell(1, 4).Value = "FUEL";
+            sheet.Cell(2, 1).Value = "570221934";
+            sheet.Cell(2, 2).Value = "46112";
+            sheet.Cell(2, 3).Value = "23.32";
+            sheet.Cell(2, 4).Value = "FSC";
+            workbook.SaveAs(tempFile.Path);
+        }
+
+        var result = CreateParser().Parse(tempFile.Path, new FuelPeriod(2026, 4), CreateSampleBranchAliasResolver());
+
+        Assert.True(result.Success);
+        var entry = Assert.Single(result.Entries);
+        Assert.Equal("TAUPO", entry.BranchId?.Value);
+        Assert.Equal(new DateOnly(2026, 4, 1), entry.Date);
+        Assert.Equal("570221934", entry.RentalAgreementNumber?.RawValue);
+        Assert.Equal(23.32m, entry.BilledAmount?.Value);
+        Assert.Equal("FSC", entry.BillingStatus);
+    }
+
+    [Fact]
+    public void Parse_skips_report_total_footer_row_without_errors()
+    {
+        using var tempFile = TemporaryExcelFile.Create();
+        using (var workbook = new XLWorkbook())
+        {
+            var sheet = workbook.Worksheets.Add("scratch");
+            sheet.Cell(1, 1).Value = "RA Number";
+            sheet.Cell(1, 2).Value = "Time In";
+            sheet.Cell(1, 3).Value = "Fuel Charges";
+            sheet.Cell(2, 1).Value = "570221934";
+            sheet.Cell(2, 2).Value = "1500";
+            sheet.Cell(2, 3).Value = "23.32";
+            sheet.Cell(3, 2).Value = "REPORT TOTAL";
+            sheet.Cell(3, 3).Value = "49754.23";
+            workbook.SaveAs(tempFile.Path);
+        }
+
+        var result = CreateParser().Parse(tempFile.Path, new FuelPeriod(2026, 4), CreateBranchAliasResolver());
+
+        Assert.True(result.Success);
+        Assert.False(result.HasErrors);
+        Assert.Single(result.Entries);
+        Assert.Equal(23.32m, result.Entries[0].BilledAmount?.Value);
     }
 
     [Fact]
@@ -312,6 +386,26 @@ public class CarsBillingExcelParserTests
                 new BranchAlias("Mobil Taupo", taupo.Id),
                 new BranchAlias("Mobile - Taupo", taupo.Id),
                 new BranchAlias("Taupo", taupo.Id),
+            ]);
+    }
+
+    private static BranchAliasResolver CreateSampleBranchAliasResolver()
+    {
+        var taupo = new BranchMaster(new CanonicalBranchId("TAUPO"), "Taupo");
+        var kerikeri = new BranchMaster(new CanonicalBranchId("KERIKERI"), "Kerikeri");
+        var whangarei = new BranchMaster(new CanonicalBranchId("WHANGAREI"), "Whangarei");
+
+        return new BranchAliasResolver(
+            [taupo, kerikeri, whangarei],
+            [
+                new BranchAlias("Taupo", taupo.Id),
+                new BranchAlias("Mobil Taupo", taupo.Id),
+                new BranchAlias("Mobile - Taupo", taupo.Id),
+                new BranchAlias("Hertz Taupo", taupo.Id),
+                new BranchAlias("Caltex Kerikeri", kerikeri.Id),
+                new BranchAlias("Caltex Whangarei", whangarei.Id),
+                new BranchAlias("Kerikeri", kerikeri.Id),
+                new BranchAlias("Whangarei", whangarei.Id),
             ]);
     }
 
