@@ -1,3 +1,4 @@
+using FuelRecon.Application.BranchReports;
 using FuelRecon.Application.Persistence;
 using FuelRecon.Domain;
 using FuelRecon.Infrastructure.Persistence;
@@ -137,6 +138,69 @@ public class SqliteReconciliationRepositoriesTests
         Assert.Equal(PeriodLifecycleStatus.Reviewed, loaded.Status);
         Assert.Equal("Ready", loaded.Notes);
         Assert.Single(reports);
+    }
+
+    [Fact]
+    public void BranchReportRepository_sqlite_rejects_duplicate_version_number_for_same_run_and_branch()
+    {
+        using var database = RepositoryTestDatabase.Create();
+        var run = SaveRun(database);
+        var repository = new SqliteBranchReportRepository(database.ConnectionFactory);
+        var summary = CreateTaupoBranchSummary(run);
+        var first = CreateReport(run);
+        repository.Save(first, summary);
+
+        var duplicateVersionNumber = new BranchReportVersion(
+            Guid.Parse("c7fd074b-90f2-4b68-8000-000000000099"),
+            run.Id,
+            new CanonicalBranchId("TAUPO"),
+            run.Period,
+            versionNumber: 1,
+            new DateTimeOffset(2026, 5, 15, 9, 0, 0, TimeSpan.Zero),
+            "arina",
+            PeriodLifecycleStatus.Draft);
+
+        var exception = Assert.Throws<SqliteException>(() => repository.Save(duplicateVersionNumber, summary));
+        Assert.Equal(19, exception.SqliteErrorCode);
+    }
+
+    [Fact]
+    public void CreateBranchReportVersionUseCase_sqlite_appends_monotonic_versions_for_same_run_and_branch()
+    {
+        using var database = RepositoryTestDatabase.Create();
+        var run = SaveRun(database);
+        var runsRepo = new SqliteReconciliationRunRepository(database.ConnectionFactory);
+        var branchRepo = new SqliteBranchReportRepository(database.ConnectionFactory);
+        var createUseCase = new CreateBranchReportVersionUseCase(runsRepo, branchRepo);
+        var listUseCase = new ListBranchReportVersionsUseCase(branchRepo);
+        var summary = CreateTaupoBranchSummary(run);
+
+        var first = createUseCase.Execute(
+            new CreateBranchReportVersionRequest(
+                run.Id,
+                new CanonicalBranchId("TAUPO"),
+                summary,
+                CreatedBy: "user-a",
+                CreatedAtUtc: new DateTimeOffset(2026, 5, 16, 9, 0, 0, TimeSpan.Zero)));
+
+        var second = createUseCase.Execute(
+            new CreateBranchReportVersionRequest(
+                run.Id,
+                new CanonicalBranchId("TAUPO"),
+                summary,
+                CreatedBy: "user-b",
+                CreatedAtUtc: new DateTimeOffset(2026, 5, 16, 10, 0, 0, TimeSpan.Zero),
+                InitialLifecycleStatus: PeriodLifecycleStatus.Reconciled));
+
+        Assert.Equal(1, first.Version.VersionNumber);
+        Assert.Equal(PeriodLifecycleStatus.Draft, first.Version.Status);
+        Assert.Equal(2, second.Version.VersionNumber);
+        Assert.Equal(PeriodLifecycleStatus.Reconciled, second.Version.Status);
+
+        var versions = listUseCase.Execute(new ListBranchReportVersionsRequest(run.Id, new CanonicalBranchId("TAUPO")));
+        Assert.Equal(2, versions.Count);
+        Assert.Equal(first.Version.Id, versions[0].Id);
+        Assert.Equal(second.Version.Id, versions[1].Id);
     }
 
     [Fact]
@@ -349,6 +413,19 @@ public class SqliteReconciliationRepositoriesTests
             litresVariance: 1.25m,
             amountVariance: new MoneyAmount(10.005m));
     }
+
+    private static BranchSummary CreateTaupoBranchSummary(ReconciliationRun run) =>
+        new(
+            new CanonicalBranchId("TAUPO"),
+            run.Period,
+            run.Id,
+            new Litres(100m),
+            new Litres(95m),
+            new Litres(90m),
+            new Litres(5m),
+            new MoneyAmount(12.345m),
+            reviewCount: 2,
+            status: ReconciliationStatus.ReviewRequired);
 
     private static BranchReportVersion CreateReport(ReconciliationRun run) =>
         new(
