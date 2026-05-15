@@ -100,6 +100,60 @@ public class SupplierPdfParserTests
         Assert.Contains(result.Issues, issue => issue.ReasonCode == BranchAliasResolver.BranchAliasNotFoundReasonCode);
     }
 
+    [Fact]
+    public void Parse_farmlands_concatenated_rows_extracts_transactions_and_deduplicates_repeated_rows()
+    {
+        using var tempFile = TemporaryFile.Create(".pdf");
+        WriteSimplePdf(
+            tempFile.Path,
+            "Farmlands Statement April " +
+            "01 Apr 26 Inv: 039842 Caltex Kerikeri 123456 Diesel 45.67 L $123.45 $107.35 " +
+            "01 Apr 26 Inv: 039842 Caltex Kerikeri 123456 Diesel 45.67 L $123.45 $107.35 " +
+            "10 Apr 26 Crd: 040457 Caltex Whangarei 444555 91 Unleaded -3.50 L -$9.50");
+
+        var result = CreateParser().Parse(tempFile.Path, new FuelPeriod(2026, 4), CreateBranchAliasResolver());
+
+        Assert.True(result.Success);
+        Assert.True(result.CandidateRowCount >= 3);
+        var entry = Assert.Single(result.Entries);
+        Assert.Equal("Farmlands", entry.SupplierName);
+        Assert.Equal(new DateOnly(2026, 4, 1), entry.TransactionDate);
+        Assert.Equal("Caltex Kerikeri", entry.RawSiteText);
+        Assert.Equal("KERIKERI", entry.BranchId?.Value);
+        Assert.Equal(45.67m, entry.Litres.Value);
+        Assert.Equal("Diesel", entry.Product);
+        Assert.Equal("Inv: 039842", entry.VoucherOrInvoiceReference);
+        Assert.Equal(123.45m, entry.Amount?.Value);
+        Assert.Equal(tempFile.Path, entry.SourceReference.SourceFile);
+        Assert.Equal(1, entry.SourceReference.PageNumber);
+        Assert.Contains(result.Issues, issue => issue.ReasonCode == SupplierPdfParser.SupplierRowNotParsedReasonCode);
+    }
+
+    [Fact]
+    public void Parse_mobil_cardholder_section_uses_cardholder_as_branch_site_text()
+    {
+        using var tempFile = TemporaryFile.Create(".pdf");
+        WriteSimplePdf(
+            tempFile.Path,
+            "Mobil Statement CARD NUMBER: 123456 NAME: HERTZ TAUPO 1/2 " +
+            "05/04/2026 13:45 Mobil Taupo VOUCHER 998877 38.40 L Diesel $140.00 GST $18.26");
+
+        var result = CreateParser().Parse(tempFile.Path, new FuelPeriod(2026, 4), CreateBranchAliasResolver());
+
+        Assert.True(result.Success);
+        var entry = Assert.Single(result.Entries);
+        Assert.Equal("Mobil", entry.SupplierName);
+        Assert.Equal(new DateOnly(2026, 4, 5), entry.TransactionDate);
+        Assert.Equal("HERTZ TAUPO 1/2", entry.Cardholder);
+        Assert.Equal("HERTZ TAUPO", entry.RawSiteText);
+        Assert.Equal("TAUPO", entry.BranchId?.Value);
+        Assert.Equal(38.40m, entry.Litres.Value);
+        Assert.Equal("Diesel", entry.Product);
+        Assert.Equal("VOUCHER 998877", entry.VoucherOrInvoiceReference);
+        Assert.Equal(140.00m, entry.Amount?.Value);
+        Assert.Equal(1, entry.SourceReference.PageNumber);
+    }
+
     [Theory]
     [InlineData("Farmlands Statement April.PDF")]
     [InlineData("Mobile - Taupo.pdf")]
@@ -115,11 +169,15 @@ public class SupplierPdfParserTests
 
         Assert.True(result.PageCount > 0);
         Assert.True(result.Entries.Count > 0 || result.Issues.Count > 0);
+        Assert.NotEmpty(result.Entries);
+        Assert.Contains(result.Entries, entry => entry.Litres.Value > 0);
 
         foreach (var entry in result.Entries)
         {
             Assert.Equal(samplePath, entry.SourceReference.SourceFile);
             Assert.NotNull(entry.SourceReference.PageNumber);
+            Assert.Equal(2026, entry.TransactionDate.Year);
+            Assert.Equal(4, entry.TransactionDate.Month);
         }
 
         foreach (var issue in result.Issues)
@@ -138,12 +196,18 @@ public class SupplierPdfParserTests
     private static BranchAliasResolver CreateBranchAliasResolver()
     {
         var taupo = new BranchMaster(new CanonicalBranchId("TAUPO"), "Taupo");
+        var kerikeri = new BranchMaster(new CanonicalBranchId("KERIKERI"), "Kerikeri");
+        var whangarei = new BranchMaster(new CanonicalBranchId("WHANGAREI"), "Whangarei");
         return new BranchAliasResolver(
-            [taupo],
+            [taupo, kerikeri, whangarei],
             [
                 new BranchAlias("Mobil Taupo", taupo.Id),
                 new BranchAlias("Mobile - Taupo", taupo.Id),
                 new BranchAlias("Taupo", taupo.Id),
+                new BranchAlias("Hertz Taupo", taupo.Id),
+                new BranchAlias("HERTZ TAUPO", taupo.Id),
+                new BranchAlias("Caltex Kerikeri", kerikeri.Id),
+                new BranchAlias("Caltex Whangarei", whangarei.Id),
             ]);
     }
 
