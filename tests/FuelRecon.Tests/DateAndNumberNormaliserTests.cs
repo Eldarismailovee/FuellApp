@@ -55,6 +55,35 @@ public class DateAndNumberNormaliserTests
     }
 
     [Theory]
+    [InlineData("22/04", 2026, 4, 22)]
+    [InlineData("1/4", 2026, 4, 1)]
+    [InlineData("06/4", 2026, 4, 6)]
+    [InlineData("4/1/2026", 2026, 4, 1)]
+    [InlineData("04/01/2026", 2026, 4, 1)]
+    [InlineData("12/04/2026", 2026, 4, 12)]
+    public void DateNormaliser_normalises_slash_dates_with_fuel_period_context(string rawValue, int expectedYear, int expectedMonth, int expectedDay)
+    {
+        var period = new FuelPeriod(2026, 4);
+        var result = DateNormaliser.NormaliseText(rawValue, period);
+
+        Assert.True(result.Success);
+        Assert.Equal(rawValue, result.RawValue);
+        Assert.Equal(new DateOnly(expectedYear, expectedMonth, expectedDay), result.NormalisedValue);
+        Assert.Null(result.ReasonCode);
+    }
+
+    [Fact]
+    public void DateNormaliser_normalises_excel_datetime_strings_with_unicode_spaces_when_invariant_parse_succeeds()
+    {
+        var raw = "4/15/2026 12:00:00\u202fAM";
+        var period = new FuelPeriod(2026, 4);
+        var result = DateNormaliser.NormaliseText(raw, period);
+
+        Assert.True(result.Success);
+        Assert.Equal(new DateOnly(2026, 4, 15), result.NormalisedValue);
+    }
+
+    [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]

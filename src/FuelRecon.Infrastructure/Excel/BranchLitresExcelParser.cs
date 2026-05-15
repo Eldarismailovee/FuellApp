@@ -37,7 +37,23 @@ public sealed class BranchLitresExcelParser(IExcelWorkbookReader workbookReader)
 
         foreach (var sheet in workbookResult.Workbook.Sheets.Where(sheet => !ExcelSheetFilter.IsNonDataSheet(sheet.SheetName)))
         {
-            var columns = BranchLitresColumns.FromSheet(sheet.Headers, sheet.SheetName);
+            var columns = BranchLitresColumns.From(sheet.Headers);
+
+            if (columns.HasMinimumRequiredColumns && sheet.Rows.Count > 0)
+            {
+                foreach (var row in sheet.Rows)
+                {
+                    if (ShouldSilentlySkipBranchLitresRow(row, columns))
+                    {
+                        continue;
+                    }
+
+                    rowCount++;
+                    ParseRow(row, period, branchAliasResolver, columns, entries, issues);
+                }
+
+                continue;
+            }
 
             if (ShouldAttemptWeakBranchLitresFallback(sheet, columns)
                 && TryReadWeakBranchLitresSheet(filePath, sheet.SheetName, out var weakColumns, out var weakRows))
@@ -51,22 +67,6 @@ public sealed class BranchLitresExcelParser(IExcelWorkbookReader workbookReader)
 
                     rowCount++;
                     ParseRow(row, period, branchAliasResolver, weakColumns, entries, issues);
-                }
-
-                continue;
-            }
-
-            if (columns.HasMinimumRequiredColumns && sheet.Rows.Count > 0)
-            {
-                foreach (var row in sheet.Rows)
-                {
-                    if (ShouldSilentlySkipBranchLitresRow(row, columns))
-                    {
-                        continue;
-                    }
-
-                    rowCount++;
-                    ParseRow(row, period, branchAliasResolver, columns, entries, issues);
                 }
 
                 continue;
@@ -91,21 +91,7 @@ public sealed class BranchLitresExcelParser(IExcelWorkbookReader workbookReader)
 
     private static bool ShouldAttemptWeakBranchLitresFallback(ExcelSheetModel sheet, BranchLitresColumns columns) =>
         IsKnownWeakFallbackBranchSheetName(sheet.SheetName)
-        && (
-            !columns.HasMinimumRequiredColumns
-            || sheet.Rows.Count == 0
-            || IsLikelyRealWeakBranchLitresSheet(sheet)
-        );
-
-    private static bool IsLikelyRealWeakBranchLitresSheet(ExcelSheetModel sheet)
-    {
-        if (!IsKnownWeakFallbackBranchSheetName(sheet.SheetName))
-        {
-            return false;
-        }
-
-        return sheet.Rows.Count > 25;
-    }
+        && (!columns.HasMinimumRequiredColumns || sheet.Rows.Count == 0);
 
     private static bool IsKnownWeakFallbackBranchSheetName(string sheetName)
     {
@@ -224,16 +210,16 @@ public sealed class BranchLitresExcelParser(IExcelWorkbookReader workbookReader)
         out BranchLitresColumns columns,
         out IReadOnlyList<ExcelRowModel> rows)
     {
-        columns = BranchLitresColumns.FromSheet([], sheetName);
         rows = [];
 
         var colCount = lastCol - firstCol + 1;
-        if (colCount < 1 || lastRow <= firstRow)
+        if (colCount < 1 || lastRow < firstRow)
         {
+            columns = new BranchLitresColumns(null, null, null, null, null, null);
             return false;
         }
 
-        columns = ClampKnownBranchSheetColumns(columns, colCount);
+        columns = CreateTaupoWeakBranchLitresColumns(colCount);
 
         var built = BuildWeakDataRowsWithoutHeaderRow(sourceFile, sheetName, worksheet, firstRow, lastRow, firstCol, colCount);
         if (built.Count == 0)
@@ -256,16 +242,16 @@ public sealed class BranchLitresExcelParser(IExcelWorkbookReader workbookReader)
         out BranchLitresColumns columns,
         out IReadOnlyList<ExcelRowModel> rows)
     {
-        columns = BranchLitresColumns.FromSheet([], sheetName);
         rows = [];
 
         var colCount = lastCol - firstCol + 1;
-        if (colCount < 1 || lastRow < firstRow)
+        if (colCount < 6 || lastRow < firstRow)
         {
+            columns = new BranchLitresColumns(null, null, null, null, null, null);
             return false;
         }
 
-        columns = ClampKnownBranchSheetColumns(columns, colCount);
+        columns = CreateKerikeriWeakBranchLitresColumns(colCount);
 
         var built = BuildWeakDataRowsWithoutHeaderRow(sourceFile, sheetName, worksheet, firstRow, lastRow, firstCol, colCount);
         if (built.Count == 0)
@@ -288,16 +274,16 @@ public sealed class BranchLitresExcelParser(IExcelWorkbookReader workbookReader)
         out BranchLitresColumns columns,
         out IReadOnlyList<ExcelRowModel> rows)
     {
-        columns = BranchLitresColumns.FromSheet([], sheetName);
         rows = [];
 
         var colCount = lastCol - firstCol + 1;
-        if (colCount < 1 || lastRow < firstRow)
+        if (colCount < 7 || lastRow < firstRow)
         {
+            columns = new BranchLitresColumns(null, null, null, null, null, null);
             return false;
         }
 
-        columns = ClampKnownBranchSheetColumns(columns, colCount);
+        columns = CreateWhangareiWeakBranchLitresColumns(colCount);
 
         var built = BuildWeakDataRowsWithoutHeaderRow(sourceFile, sheetName, worksheet, firstRow, lastRow, firstCol, colCount);
         if (built.Count == 0)
@@ -309,19 +295,56 @@ public sealed class BranchLitresExcelParser(IExcelWorkbookReader workbookReader)
         return true;
     }
 
-    private static BranchLitresColumns ClampKnownBranchSheetColumns(BranchLitresColumns columns, int colCount)
+    /// <summary>
+    /// Taupo “weak” exports often place litres around column E (index 4) and dates further right.
+    /// </summary>
+    private static BranchLitresColumns CreateTaupoWeakBranchLitresColumns(int colCount)
     {
-        if (colCount <= 0)
+        var maxIdx = colCount - 1;
+        var litresIdx = Math.Min(4, maxIdx);
+        var dateIdx = Math.Min(6, maxIdx);
+        if (dateIdx == litresIdx && maxIdx > 0)
         {
-            return columns;
+            dateIdx = 0;
         }
 
-        return columns with
-        {
-            DateColumnIndex = columns.DateColumnIndex is null ? null : Math.Min(columns.DateColumnIndex.Value, colCount - 1),
-            LitresColumnIndex = columns.LitresColumnIndex is null ? null : Math.Min(columns.LitresColumnIndex.Value, colCount - 1),
-            RegoColumnIndex = columns.RegoColumnIndex is null ? null : Math.Min(columns.RegoColumnIndex.Value, colCount - 1)
-        };
+        return new BranchLitresColumns(
+            BranchColumnIndex: null,
+            DateColumnIndex: dateIdx,
+            LitresColumnIndex: litresIdx,
+            RentalAgreementColumnIndex: null,
+            RegoColumnIndex: null,
+            NoteColumnIndex: null);
+    }
+
+    /// <summary>
+    /// Matches synthetic Kerikeri fixtures: litres at Excel column D (index 3), date at column F (index 5).
+    /// </summary>
+    private static BranchLitresColumns CreateKerikeriWeakBranchLitresColumns(int colCount)
+    {
+        var maxIdx = colCount - 1;
+        return new BranchLitresColumns(
+            BranchColumnIndex: null,
+            DateColumnIndex: Math.Min(5, maxIdx),
+            LitresColumnIndex: Math.Min(3, maxIdx),
+            RentalAgreementColumnIndex: null,
+            RegoColumnIndex: null,
+            NoteColumnIndex: null);
+    }
+
+    /// <summary>
+    /// Matches synthetic Whangarei fixtures: litres at Excel column F (index 5), date at column G (index 6).
+    /// </summary>
+    private static BranchLitresColumns CreateWhangareiWeakBranchLitresColumns(int colCount)
+    {
+        var maxIdx = colCount - 1;
+        return new BranchLitresColumns(
+            BranchColumnIndex: null,
+            DateColumnIndex: Math.Min(6, maxIdx),
+            LitresColumnIndex: Math.Min(5, maxIdx),
+            RentalAgreementColumnIndex: null,
+            RegoColumnIndex: null,
+            NoteColumnIndex: null);
     }
 
     private static List<ExcelRowModel> BuildWeakDataRowsWithoutHeaderRow(
@@ -368,20 +391,29 @@ public sealed class BranchLitresExcelParser(IExcelWorkbookReader workbookReader)
         }
 
         var litresText = TrimmedPresentText(row.GetCellRawText(columns.LitresColumnIndex));
-        var dateText = TrimmedPresentText(row.GetCellRawText(columns.DateColumnIndex));
-        var raText = TrimmedPresentText(row.GetCellRawText(columns.RentalAgreementColumnIndex));
-        var regoText = TrimmedPresentText(row.GetCellRawText(columns.RegoColumnIndex));
-        var noteText = TrimmedPresentText(row.GetCellRawText(columns.NoteColumnIndex));
-
         if (litresText is null)
         {
-            return dateText is null
-                && raText is null
-                && regoText is null
-                && noteText is null;
+            return true;
         }
 
-        return false;
+        return IsLitresColumnHeaderOrCategoryLabel(litresText);
+    }
+
+    /// <summary>
+    /// Rows where the “litres” cell repeats a header alias or a known non-volume category should not surface as parse errors.
+    /// </summary>
+    private static bool IsLitresColumnHeaderOrCategoryLabel(string litresText)
+    {
+        var normalisedCell = ExcelColumnHeaderMatcher.Normalise(litresText);
+        foreach (var alias in ExcelParserKnownHeaders.BranchLitres.Litres)
+        {
+            if (ExcelColumnHeaderMatcher.Normalise(alias) == normalisedCell)
+            {
+                return true;
+            }
+        }
+
+        return normalisedCell.Equals("nonrev", StringComparison.Ordinal);
     }
 
     private static string? TrimmedPresentText(string? raw)
@@ -436,7 +468,7 @@ public sealed class BranchLitresExcelParser(IExcelWorkbookReader workbookReader)
 
         var noteOrReference = TrimToNull(row.GetCellRawText(columns.NoteColumnIndex));
 
-        var date = ResolveDate(row, period, columns, sourceReference, rentalAgreementNumber, rego, noteOrReference, rowIssues);
+        var date = ResolveDate(row, period, columns, sourceReference, rowIssues);
 
         if (rowIssues.Any(issue => issue.Severity == ValidationSeverity.Error))
         {
@@ -453,11 +485,16 @@ public sealed class BranchLitresExcelParser(IExcelWorkbookReader workbookReader)
             issues.Add(issue);
         }
 
+        if (date is null)
+        {
+            return;
+        }
+
         entries.Add(new BranchLitresEntry(
             Guid.NewGuid(),
             period,
             branchResult.BranchId!.Value,
-            date!.Value,
+            date.Value,
             litresResult.NormalisedValue!.Value,
             sourceReference,
             rentalAgreementNumber,
@@ -471,19 +508,45 @@ public sealed class BranchLitresExcelParser(IExcelWorkbookReader workbookReader)
         FuelPeriod period,
         BranchLitresColumns columns,
         SourceReference sourceReference,
-        RentalAgreementNumber? rentalAgreementNumber,
-        Rego? rego,
-        string? noteOrReference,
         ICollection<BranchLitresParseIssue> rowIssues)
     {
         var rawDate = row.GetCellRawText(columns.DateColumnIndex);
         if (!string.IsNullOrWhiteSpace(rawDate))
         {
-            var dateResult = DateNormaliser.NormaliseText(rawDate);
+            if (LooksLikeBranchLitresScheduleQualifierInsteadOfCalendarDate(rawDate))
+            {
+                rowIssues.Add(new BranchLitresParseIssue(
+                    ValidationSeverity.Warning,
+                    MissingDateDefaultedReasonCode,
+                    "Date was missing; first day of the fuel period was used.",
+                    sourceReference));
+
+                return new DateOnly(period.Year, period.Month, 1);
+            }
+
+            var dateResult = DateNormaliser.NormaliseText(rawDate, period);
             if (dateResult.Success && dateResult.NormalisedValue is not null)
             {
                 return dateResult.NormalisedValue.Value;
             }
+
+            if (ShouldTreatFailedDateNormalisationAsMissing(rawDate))
+            {
+                rowIssues.Add(new BranchLitresParseIssue(
+                    ValidationSeverity.Warning,
+                    MissingDateDefaultedReasonCode,
+                    "Date was missing; first day of the fuel period was used.",
+                    sourceReference));
+
+                return new DateOnly(period.Year, period.Month, 1);
+            }
+
+            rowIssues.Add(new BranchLitresParseIssue(
+                ValidationSeverity.Error,
+                dateResult.ReasonCode ?? DateNormaliser.InvalidDateFormatReasonCode,
+                $"Date value '{rawDate}' could not be normalised.",
+                sourceReference));
+            return null;
         }
 
         rowIssues.Add(new BranchLitresParseIssue(
@@ -493,6 +556,32 @@ public sealed class BranchLitresExcelParser(IExcelWorkbookReader workbookReader)
             sourceReference));
 
         return new DateOnly(period.Year, period.Month, 1);
+    }
+
+    private static bool LooksLikeBranchLitresScheduleQualifierInsteadOfCalendarDate(string rawDate)
+    {
+        var trimmed = rawDate.Trim();
+        return trimmed.Contains("after ", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Real branch-litre grids sometimes put clock-style values (e.g. 1730) or placeholders in the date column.
+    /// Treat those like a missing date (warn + period start) instead of failing the row as an invalid date string.
+    /// </summary>
+    private static bool ShouldTreatFailedDateNormalisationAsMissing(string rawDate)
+    {
+        var trimmed = rawDate.Trim();
+        if (trimmed.Length == 0)
+        {
+            return false;
+        }
+
+        if (trimmed is "?" or "-" or "." or "–" or "—")
+        {
+            return true;
+        }
+
+        return trimmed.All(char.IsDigit) && trimmed.Length is >= 3 and <= 4;
     }
 
     private static RentalAgreementNumber? NormaliseRentalAgreement(
@@ -572,11 +661,6 @@ public sealed class BranchLitresExcelParser(IExcelWorkbookReader workbookReader)
 
     private static string ResolveBranchAliasInput(ExcelRowModel row, BranchLitresColumns columns)
     {
-        if (IsKnownWeakFallbackBranchSheetName(row.SheetName))
-        {
-            return row.SheetName.Trim();
-        }
-
         if (columns.BranchColumnIndex is not null)
         {
             return TrimToNull(row.GetCellRawText(columns.BranchColumnIndex)) ?? string.Empty;
@@ -605,30 +689,6 @@ internal sealed record BranchLitresColumns(
             ExcelColumnHeaderMatcher.FindFirstMatchingColumn(headers, ExcelParserKnownHeaders.BranchLitres.RentalAgreement),
             ExcelColumnHeaderMatcher.FindFirstMatchingColumn(headers, ExcelParserKnownHeaders.BranchLitres.Rego),
             ExcelColumnHeaderMatcher.FindFirstMatchingColumn(headers, ExcelParserKnownHeaders.BranchLitres.Note));
-
-    public static BranchLitresColumns FromSheet(IReadOnlyList<string> headers, string sheetName)
-    {
-        var columns = From(headers);
-
-        var normalisedSheetName = ExcelColumnHeaderMatcher.Normalise(sheetName);
-        var isKnownBranchSheet =
-            normalisedSheetName is "taupo"
-            or "kerikeri"
-            or "whangarei";
-
-        if (!isKnownBranchSheet)
-        {
-            return columns;
-        }
-
-        return columns with
-        {
-            DateColumnIndex = columns.DateColumnIndex ?? 6,
-            LitresColumnIndex = columns.LitresColumnIndex ?? 4,
-            RegoColumnIndex = columns.RegoColumnIndex ?? 0,
-            BranchColumnIndex = null
-        };
-    }
 }
 
 internal static class ExcelRowModelExtensions

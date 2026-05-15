@@ -29,6 +29,7 @@ internal static class ExcelParserKnownHeaders
             "Fueling Date",
             "Posting Date",
             "Invoice Date",
+            "When",
         ];
 
         internal static readonly string[] Litres =

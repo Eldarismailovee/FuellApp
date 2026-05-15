@@ -16,7 +16,10 @@ public sealed class DeterministicReconciliationEngine : IReconciliationEngine
         ArgumentNullException.ThrowIfNull(input);
 
         var rules = input.Rules ?? ReconciliationRulesOptions.Default;
-        var runId = DeterministicGuid("run", input.Period.ToSortableString());
+        var runId = DeterministicGuid(
+            "run",
+            input.Period.ToSortableString(),
+            input.ImportBatchId.ToString("N"));
         var items = new List<ReconciliationItem>();
         var matchedCarsIds = new HashSet<Guid>();
 

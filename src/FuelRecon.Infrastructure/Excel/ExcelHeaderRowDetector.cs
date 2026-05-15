@@ -87,6 +87,11 @@ internal static class ExcelHeaderRowDetector
                 score += 10;
             }
 
+            if (Matches(value, ExcelParserKnownHeaders.BranchLitres.Note))
+            {
+                score += 15;
+            }
+
             if (value.Any(char.IsLetter))
             {
                 score += 2;

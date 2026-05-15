@@ -201,6 +201,7 @@ public class ProcessFuelReconciliationUseCaseTests
             var validationResult = CreateValidValidationResult();
             var engineResult = new DeterministicReconciliationEngine().Reconcile(new ReconciliationEngineInput(
                 new FuelPeriod(2026, 4),
+                Guid.Parse("173d4e65-277a-4987-9000-000000000020"),
                 validationResult.SupplierTransactions,
                 validationResult.BranchLitresEntries,
                 validationResult.CarsBillingEntries));

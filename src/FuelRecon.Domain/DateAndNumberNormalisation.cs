@@ -1,4 +1,7 @@
 using System.Globalization;
+using System.Linq;
+using System.Text;
+using System.Text.RegularExpressions;
 
 namespace FuelRecon.Domain;
 
@@ -95,6 +98,9 @@ public static class DateNormaliser
 
     public const string AmbiguousDateFormatReasonCode = "AmbiguousDateFormat";
 
+    private static readonly Regex SlashNumericDate =
+        new(@"^\s*(\d{1,2})/(\d{1,2})(?:/(\d{4}))?\s*$", RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
     private static readonly string[] FullDateFormats =
     [
         "d/M/yyyy",
@@ -144,7 +150,7 @@ public static class DateNormaliser
         }
     }
 
-    public static DateNormalisationResult NormaliseText(string? rawValue)
+    public static DateNormalisationResult NormaliseText(string? rawValue, FuelPeriod? fuelPeriod = null)
     {
         var preservedRawValue = rawValue ?? string.Empty;
 
@@ -153,11 +159,17 @@ public static class DateNormaliser
             return DateNormalisationResult.Invalid(preservedRawValue, InvalidDateFormatReasonCode);
         }
 
-        var trimmedValue = rawValue.Trim();
+        var trimmedValue = SanitizeDateLikeText(rawValue);
 
         if (LooksLikeAmbiguousTwoDigitYearDate(trimmedValue))
         {
             return DateNormalisationResult.Invalid(preservedRawValue, AmbiguousDateFormatReasonCode);
+        }
+
+        if (fuelPeriod is not null
+            && TryParseNumericSlashDate(trimmedValue, fuelPeriod.Value, out var slashDate))
+        {
+            return DateNormalisationResult.Valid(preservedRawValue, slashDate);
         }
 
         if (DateTime.TryParseExact(
@@ -180,7 +192,140 @@ public static class DateNormaliser
             return DateNormalisationResult.Valid(preservedRawValue, new DateOnly(monthYear.Year, monthYear.Month, 1));
         }
 
+        if (DateTime.TryParse(trimmedValue, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out var invariantParsed))
+        {
+            return DateNormalisationResult.Valid(preservedRawValue, DateOnly.FromDateTime(invariantParsed));
+        }
+
         return DateNormalisationResult.Invalid(preservedRawValue, InvalidDateFormatReasonCode);
+    }
+
+    /// <summary>
+    /// Normalises Excel / PDF text that may contain unicode spaces (e.g. narrow no-break space before AM/PM).
+    /// </summary>
+    private static string SanitizeDateLikeText(string rawValue)
+    {
+        var span = rawValue.Trim();
+        if (span.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        var builder = new StringBuilder(span.Length);
+        foreach (var character in span)
+        {
+            builder.Append(character switch
+            {
+                '\u00a0' or '\u202f' or '\u2007' or '\ufeff' => ' ',
+                _ => character,
+            });
+        }
+
+        return CollapseAsciiWhitespace(builder.ToString()).Trim();
+    }
+
+    private static string CollapseAsciiWhitespace(string value)
+    {
+        var builder = new StringBuilder(value.Length);
+        var pendingSpace = false;
+        foreach (var character in value)
+        {
+            if (character is ' ' or '\t' or '\r' or '\n')
+            {
+                pendingSpace = true;
+                continue;
+            }
+
+            if (pendingSpace && builder.Length > 0)
+            {
+                builder.Append(' ');
+            }
+
+            pendingSpace = false;
+            builder.Append(character);
+        }
+
+        return builder.ToString();
+    }
+
+    /// <summary>
+    /// Parses <c>d/M</c>, <c>dd/MM</c>, <c>d/M/yyyy</c>, etc. using NZ day/month ordering by default and,
+    /// when both US and NZ interpretations are valid, prefers the one inside <paramref name="fuelPeriod"/>.
+    /// </summary>
+    private static bool TryParseNumericSlashDate(string trimmedValue, FuelPeriod fuelPeriod, out DateOnly date)
+    {
+        date = default;
+        var match = SlashNumericDate.Match(trimmedValue);
+        if (!match.Success)
+        {
+            return false;
+        }
+
+        var a = int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
+        var b = int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture);
+        var yearGroup = match.Groups[3].Value;
+
+        if (string.IsNullOrEmpty(yearGroup))
+        {
+            if (TryCreateDate(fuelPeriod.Year, month: b, day: a, out date))
+            {
+                return true;
+            }
+
+            return TryCreateDate(fuelPeriod.Year, month: a, day: b, out date);
+        }
+
+        var year = int.Parse(yearGroup, CultureInfo.InvariantCulture);
+
+        var interpretations = new List<DateOnly>(capacity: 2);
+        if (TryCreateDate(year, month: b, day: a, out var nzStyle))
+        {
+            interpretations.Add(nzStyle);
+        }
+
+        if (TryCreateDate(year, month: a, day: b, out var mdStyle))
+        {
+            if (!interpretations.Exists(existing => existing == mdStyle))
+            {
+                interpretations.Add(mdStyle);
+            }
+        }
+
+        if (interpretations.Count == 0)
+        {
+            return false;
+        }
+
+        if (interpretations.Count == 1)
+        {
+            date = interpretations[0];
+            return true;
+        }
+
+        var inFuelMonth = interpretations
+            .Where(candidate => candidate.Year == fuelPeriod.Year && candidate.Month == fuelPeriod.Month)
+            .ToList();
+
+        if (inFuelMonth.Count == 1)
+        {
+            date = inFuelMonth[0];
+            return true;
+        }
+
+        date = interpretations[0];
+        return true;
+    }
+
+    private static bool TryCreateDate(int year, int month, int day, out DateOnly date)
+    {
+        date = default;
+        if (month is < 1 or > 12 || day < 1 || day > DateTime.DaysInMonth(year, month))
+        {
+            return false;
+        }
+
+        date = new DateOnly(year, month, day);
+        return true;
     }
 
     private static bool LooksLikeAmbiguousTwoDigitYearDate(string value)

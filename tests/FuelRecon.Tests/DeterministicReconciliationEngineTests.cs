@@ -133,7 +133,7 @@ public class DeterministicReconciliationEngineTests
     {
         var branch = BranchEntry("10000000-0000-0000-0000-000000000008", ra: "RA-DET", litres: 8m);
         var cars = CarsEntry("20000000-0000-0000-0000-000000000009", ra: "RA-DET", litres: 8m);
-        var input = new ReconciliationEngineInput(Period, [], [branch], [cars]);
+        var input = new ReconciliationEngineInput(Period, TestImportBatchId, [], [branch], [cars]);
         var engine = new DeterministicReconciliationEngine();
 
         var first = engine.Reconcile(input);
@@ -146,6 +146,8 @@ public class DeterministicReconciliationEngineTests
         Assert.Equal(first.BranchSummaries.Select(summary => summary.BranchId.Value), second.BranchSummaries.Select(summary => summary.BranchId.Value));
     }
 
+    private static Guid TestImportBatchId => Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+
     private static FuelPeriod Period => new(2026, 4);
 
     private static ReconciliationEngineResult Reconcile(
@@ -155,6 +157,7 @@ public class DeterministicReconciliationEngineTests
         ReconciliationRulesOptions? rules = null) =>
         new DeterministicReconciliationEngine().Reconcile(new ReconciliationEngineInput(
             Period,
+            TestImportBatchId,
             suppliers ?? [],
             branches ?? [],
             cars ?? [],

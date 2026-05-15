@@ -4,6 +4,7 @@ namespace FuelRecon.Application.Reconciliation;
 
 public sealed record ReconciliationEngineInput(
     FuelPeriod Period,
+    Guid ImportBatchId,
     IReadOnlyList<SupplierTransaction> SupplierTransactions,
     IReadOnlyList<BranchLitresEntry> BranchLitresEntries,
     IReadOnlyList<CarsBillingEntry> CarsBillingEntries,

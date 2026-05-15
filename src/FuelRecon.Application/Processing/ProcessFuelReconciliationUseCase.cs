@@ -40,6 +40,7 @@ public sealed class ProcessFuelReconciliationUseCase(
 
         var reconciliationResult = reconciliationEngine.Reconcile(new ReconciliationEngineInput(
             request.Period,
+            importPersistenceResponse.ImportBatchId,
             validationResult.SupplierTransactions,
             validationResult.BranchLitresEntries,
             validationResult.CarsBillingEntries,
