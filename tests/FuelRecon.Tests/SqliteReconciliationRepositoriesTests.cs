@@ -277,11 +277,164 @@ public class SqliteReconciliationRepositoriesTests
         Assert.Single(audits);
     }
 
+    [Fact]
+    public void BranchReportRepository_GetPersistedMetrics_returns_inserted_totals()
+    {
+        using var database = RepositoryTestDatabase.Create();
+        var run = SaveRun(database);
+        var summary = CreateTaupoBranchSummary(run);
+        var repository = new SqliteBranchReportRepository(database.ConnectionFactory);
+        var report = CreateReport(run);
+        repository.Save(report, summary);
+
+        var metrics = repository.GetPersistedMetrics(report.Id);
+
+        Assert.NotNull(metrics);
+        Assert.Equal(summary.ReviewCount, metrics.ReviewCount);
+        Assert.Equal(PeriodLifecycleStatus.Reviewed, metrics.LifecycleStatus);
+        Assert.Equal(summary.SupplierLitres.Value, metrics.SupplierLitres.Value);
+        Assert.Equal(summary.BranchLitres.Value, metrics.BranchLitres.Value);
+        Assert.Equal(summary.EstimatedRecovery.Value, metrics.EstimatedRecovery.Value);
+    }
+
+    [Fact]
+    public void BranchReportNoteRepository_saves_and_orders_by_created_time()
+    {
+        using var database = RepositoryTestDatabase.Create();
+        var run = SaveRun(database);
+        var report = SaveReport(database, run);
+        var repository = new SqliteBranchReportNoteRepository(database.ConnectionFactory);
+        var later = new BranchReportNote(
+            Guid.Parse("c7fd074b-90f2-4b68-8000-000000000081"),
+            report.Id,
+            new DateTimeOffset(2026, 5, 15, 18, 0, 0, TimeSpan.Zero),
+            "b",
+            "second");
+        var earlier = new BranchReportNote(
+            Guid.Parse("c7fd074b-90f2-4b68-8000-000000000080"),
+            report.Id,
+            new DateTimeOffset(2026, 5, 15, 17, 0, 0, TimeSpan.Zero),
+            "a",
+            "first");
+
+        repository.Save(later);
+        repository.Save(earlier);
+
+        var notes = repository.ListByBranchReport(report.Id);
+
+        Assert.Equal(2, notes.Count);
+        Assert.Equal("first", notes[0].NoteText);
+        Assert.Equal("second", notes[1].NoteText);
+    }
+
+    [Fact]
+    public void BranchReportApprovalRepository_round_trips_snapshot_and_optional_note()
+    {
+        using var database = RepositoryTestDatabase.Create();
+        var run = SaveRun(database);
+        var report = SaveReport(database, run);
+        var repository = new SqliteBranchReportApprovalRepository(database.ConnectionFactory);
+        var approval = new BranchReportApprovalRecord(
+            Guid.Parse("c7fd074b-90f2-4b68-8000-000000000082"),
+            report.Id,
+            run.Id,
+            new DateTimeOffset(2026, 5, 15, 19, 0, 0, TimeSpan.Zero),
+            "mgr",
+            "{\"branch\":\"TAUPO\"}",
+            "Looks good");
+
+        repository.Save(approval);
+
+        var loaded = repository.FindByBranchReport(report.Id);
+
+        Assert.NotNull(loaded);
+        Assert.Equal(approval.Id, loaded.Id);
+        Assert.Equal("{\"branch\":\"TAUPO\"}", loaded.SnapshotJson);
+        Assert.Equal("Looks good", loaded.ApprovalNote);
+    }
+
+    [Fact]
+    public void BranchReportApprovalRepository_rejects_second_row_for_same_branch_report()
+    {
+        using var database = RepositoryTestDatabase.Create();
+        var run = SaveRun(database);
+        var report = SaveReport(database, run);
+        var repository = new SqliteBranchReportApprovalRepository(database.ConnectionFactory);
+        var first = new BranchReportApprovalRecord(
+            Guid.Parse("f7fd074b-90f2-4b68-8000-000000000070"),
+            report.Id,
+            run.Id,
+            new DateTimeOffset(2026, 5, 15, 16, 0, 0, TimeSpan.Zero),
+            "arina",
+            "{}",
+            null);
+        repository.Save(first);
+
+        var duplicate = new BranchReportApprovalRecord(
+            Guid.Parse("f7fd074b-90f2-4b68-8000-000000000071"),
+            report.Id,
+            run.Id,
+            new DateTimeOffset(2026, 5, 15, 16, 1, 0, TimeSpan.Zero),
+            "arina",
+            "{\"dup\":true}",
+            "again");
+
+        var exception = Assert.Throws<SqliteException>(() => repository.Save(duplicate));
+        Assert.Equal(19, exception.SqliteErrorCode);
+    }
+
+    [Fact]
+    public void ApproveBranchReportVersionUseCase_sqlite_requires_note_when_unresolved_items_exist()
+    {
+        using var database = RepositoryTestDatabase.Create();
+        var run = SaveRun(database);
+        var summary = CreateTaupoBranchSummary(run);
+        var report = SaveReport(database, run, summary);
+        var itemsRepo = new SqliteReconciliationItemRepository(database.ConnectionFactory);
+        itemsRepo.Save(CreateItem(run));
+
+        var branchRepo = new SqliteBranchReportRepository(database.ConnectionFactory);
+        var approvalsRepo = new SqliteBranchReportApprovalRepository(database.ConnectionFactory);
+        var auditsRepo = new SqliteAuditRepository(database.ConnectionFactory);
+        var useCase = new ApproveBranchReportVersionUseCase(branchRepo, approvalsRepo, itemsRepo, auditsRepo);
+
+        var missingNote = Assert.Throws<ArgumentException>(() =>
+            useCase.Execute(
+                new ApproveBranchReportVersionRequest(
+                    report.Id,
+                    ApprovedBy: "mgr",
+                    ApprovedAtUtc: new DateTimeOffset(2026, 5, 15, 17, 0, 0, TimeSpan.Zero),
+                    ApprovalNote: null)));
+        Assert.Contains(
+            BranchReportAuditReasonCodes.ApprovalNoteRequiredForUnresolvedItems,
+            missingNote.Message,
+            StringComparison.Ordinal);
+
+        var response = useCase.Execute(
+            new ApproveBranchReportVersionRequest(
+                report.Id,
+                ApprovedBy: "mgr",
+                ApprovedAtUtc: new DateTimeOffset(2026, 5, 15, 17, 1, 0, TimeSpan.Zero),
+                ApprovalNote: "Proceeding with exceptions."));
+
+        Assert.NotNull(approvalsRepo.FindByBranchReport(report.Id));
+        Assert.Contains("\"ReviewCount\":2", response.Approval.SnapshotJson, StringComparison.Ordinal);
+
+        var audits = auditsRepo
+            .ListByEntity(AuditEntityType.BranchReport, report.Id.ToString("D"))
+            .Where(auditRecord => auditRecord.ActionType == AuditActionType.Approve)
+            .ToArray();
+        Assert.Single(audits);
+        Assert.Equal(BranchReportAuditReasonCodes.Approved, audits[0].ReasonCode);
+    }
+
     [Theory]
     [InlineData("ReconciliationRuns")]
     [InlineData("BranchReports")]
     [InlineData("PdfExports")]
     [InlineData("AuditRecords")]
+    [InlineData("BranchReportNotes")]
+    [InlineData("BranchReportApprovals")]
     public void Append_only_triggers_prevent_update_and_delete_for_protected_tables(string tableName)
     {
         using var database = RepositoryTestDatabase.Create();
@@ -296,6 +449,8 @@ public class SqliteReconciliationRepositoriesTests
             "BranchReports" => report.Id.ToString(),
             "PdfExports" => export.Id.ToString(),
             "AuditRecords" => audit.Id.ToString(),
+            "BranchReportNotes" => SaveBranchReportNote(database, report).Id.ToString(),
+            "BranchReportApprovals" => SaveBranchReportApproval(database, run, report).Id.ToString(),
             _ => throw new InvalidOperationException("Unexpected table name."),
         };
 
@@ -323,10 +478,10 @@ public class SqliteReconciliationRepositoriesTests
         return run;
     }
 
-    private static BranchReportVersion SaveReport(RepositoryTestDatabase database, ReconciliationRun run)
+    private static BranchReportVersion SaveReport(RepositoryTestDatabase database, ReconciliationRun run, BranchSummary? summary = null)
     {
         var report = CreateReport(run);
-        new SqliteBranchReportRepository(database.ConnectionFactory).Save(report);
+        new SqliteBranchReportRepository(database.ConnectionFactory).Save(report, summary);
         return report;
     }
 
@@ -355,6 +510,35 @@ public class SqliteReconciliationRepositoriesTests
             "UnitTest");
         new SqliteAuditRepository(database.ConnectionFactory).Save(audit);
         return audit;
+    }
+
+    private static BranchReportNote SaveBranchReportNote(RepositoryTestDatabase database, BranchReportVersion report)
+    {
+        var note = new BranchReportNote(
+            Guid.Parse("d7fd074b-90f2-4b68-8000-000000000060"),
+            report.Id,
+            new DateTimeOffset(2026, 5, 15, 11, 0, 0, TimeSpan.Zero),
+            "arina",
+            "append-only probe");
+        new SqliteBranchReportNoteRepository(database.ConnectionFactory).Save(note);
+        return note;
+    }
+
+    private static BranchReportApprovalRecord SaveBranchReportApproval(
+        RepositoryTestDatabase database,
+        ReconciliationRun run,
+        BranchReportVersion report)
+    {
+        var approval = new BranchReportApprovalRecord(
+            Guid.Parse("e7fd074b-90f2-4b68-8000-000000000061"),
+            report.Id,
+            run.Id,
+            new DateTimeOffset(2026, 5, 15, 11, 1, 0, TimeSpan.Zero),
+            "arina",
+            "{}",
+            null);
+        new SqliteBranchReportApprovalRepository(database.ConnectionFactory).Save(approval);
+        return approval;
     }
 
     private static SettingsSnapshotRecord CreateSettingsSnapshot() =>

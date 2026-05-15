@@ -358,4 +358,56 @@ public static class SqliteSchema
             SELECT RAISE(ABORT, 'AuditRecords are append-only');
         END;
         """;
+
+    public const string Migration002BranchReportNotesAndApprovals = """
+        CREATE TABLE IF NOT EXISTS BranchReportNotes (
+            Id TEXT PRIMARY KEY,
+            BranchReportId TEXT NOT NULL,
+            CreatedAtUtc TEXT NOT NULL,
+            CreatedBy TEXT NOT NULL,
+            NoteText TEXT NOT NULL,
+            ReasonCode TEXT,
+            FOREIGN KEY (BranchReportId) REFERENCES BranchReports (Id) ON DELETE RESTRICT
+        );
+
+        CREATE INDEX IF NOT EXISTS IX_BranchReportNotes_BranchReportId ON BranchReportNotes (BranchReportId, CreatedAtUtc);
+
+        CREATE TABLE IF NOT EXISTS BranchReportApprovals (
+            Id TEXT PRIMARY KEY,
+            BranchReportId TEXT NOT NULL,
+            RunId TEXT NOT NULL,
+            ApprovedAtUtc TEXT NOT NULL,
+            ApprovedBy TEXT NOT NULL,
+            ApprovalNote TEXT,
+            SnapshotJson TEXT NOT NULL,
+            FOREIGN KEY (BranchReportId) REFERENCES BranchReports (Id) ON DELETE RESTRICT,
+            FOREIGN KEY (RunId) REFERENCES ReconciliationRuns (Id) ON DELETE RESTRICT
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS UX_BranchReportApprovals_BranchReportId ON BranchReportApprovals (BranchReportId);
+
+        CREATE TRIGGER IF NOT EXISTS TR_BranchReportNotes_PreventUpdate
+        BEFORE UPDATE ON BranchReportNotes
+        BEGIN
+            SELECT RAISE(ABORT, 'BranchReportNotes are append-only');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS TR_BranchReportNotes_PreventDelete
+        BEFORE DELETE ON BranchReportNotes
+        BEGIN
+            SELECT RAISE(ABORT, 'BranchReportNotes are append-only');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS TR_BranchReportApprovals_PreventUpdate
+        BEFORE UPDATE ON BranchReportApprovals
+        BEGIN
+            SELECT RAISE(ABORT, 'BranchReportApprovals are append-only');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS TR_BranchReportApprovals_PreventDelete
+        BEFORE DELETE ON BranchReportApprovals
+        BEGIN
+            SELECT RAISE(ABORT, 'BranchReportApprovals are append-only');
+        END;
+        """;
 }

@@ -478,6 +478,123 @@ public sealed record BranchReportVersion
 }
 
 /// <summary>
+/// Append-only branch report note (does not alter reconciliation evidence).
+/// </summary>
+public sealed record BranchReportNote
+{
+    public BranchReportNote(
+        Guid id,
+        Guid branchReportVersionId,
+        DateTimeOffset createdAtUtc,
+        string createdBy,
+        string noteText,
+        string? reasonCode = null)
+    {
+        if (id == Guid.Empty)
+        {
+            throw new ArgumentException("Branch report note ID cannot be empty.", nameof(id));
+        }
+
+        if (branchReportVersionId == Guid.Empty)
+        {
+            throw new ArgumentException("Branch report version ID cannot be empty.", nameof(branchReportVersionId));
+        }
+
+        if (string.IsNullOrWhiteSpace(createdBy))
+        {
+            throw new ArgumentException("Created by cannot be empty.", nameof(createdBy));
+        }
+
+        if (string.IsNullOrWhiteSpace(noteText))
+        {
+            throw new ArgumentException("Note text cannot be empty.", nameof(noteText));
+        }
+
+        Id = id;
+        BranchReportVersionId = branchReportVersionId;
+        CreatedAtUtc = createdAtUtc;
+        CreatedBy = createdBy.Trim();
+        NoteText = noteText.Trim();
+        ReasonCode = ReconciliationModelHelpers.TrimToNull(reasonCode);
+    }
+
+    public Guid Id { get; }
+
+    public Guid BranchReportVersionId { get; }
+
+    public DateTimeOffset CreatedAtUtc { get; }
+
+    public string CreatedBy { get; }
+
+    public string NoteText { get; }
+
+    public string? ReasonCode { get; }
+}
+
+/// <summary>
+/// Append-only approval of a branch report version; preserves a snapshot of persisted summary metrics at approval time.
+/// </summary>
+public sealed record BranchReportApprovalRecord
+{
+    public BranchReportApprovalRecord(
+        Guid id,
+        Guid branchReportVersionId,
+        Guid runId,
+        DateTimeOffset approvedAtUtc,
+        string approvedBy,
+        string snapshotJson,
+        string? approvalNote = null)
+    {
+        if (id == Guid.Empty)
+        {
+            throw new ArgumentException("Approval record ID cannot be empty.", nameof(id));
+        }
+
+        if (branchReportVersionId == Guid.Empty)
+        {
+            throw new ArgumentException("Branch report version ID cannot be empty.", nameof(branchReportVersionId));
+        }
+
+        if (runId == Guid.Empty)
+        {
+            throw new ArgumentException("Run ID cannot be empty.", nameof(runId));
+        }
+
+        if (string.IsNullOrWhiteSpace(approvedBy))
+        {
+            throw new ArgumentException("Approved by cannot be empty.", nameof(approvedBy));
+        }
+
+        if (string.IsNullOrWhiteSpace(snapshotJson))
+        {
+            throw new ArgumentException("Snapshot JSON cannot be empty.", nameof(snapshotJson));
+        }
+
+        Id = id;
+        BranchReportVersionId = branchReportVersionId;
+        RunId = runId;
+        ApprovedAtUtc = approvedAtUtc;
+        ApprovedBy = approvedBy.Trim();
+        ApprovalNote = ReconciliationModelHelpers.TrimToNull(approvalNote);
+        SnapshotJson = snapshotJson.Trim();
+    }
+
+    public Guid Id { get; }
+
+    public Guid BranchReportVersionId { get; }
+
+    public Guid RunId { get; }
+
+    public DateTimeOffset ApprovedAtUtc { get; }
+
+    public string ApprovedBy { get; }
+
+    public string? ApprovalNote { get; }
+
+    public string SnapshotJson { get; }
+}
+
+/// <summary>
 /// Immutable record of a single branch report PDF export attempt.
 /// </summary>
 public sealed record PdfExportRecord

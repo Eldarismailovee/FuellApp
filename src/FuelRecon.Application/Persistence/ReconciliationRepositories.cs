@@ -22,6 +22,15 @@ public interface IReconciliationItemRepository
     IReadOnlyList<ReconciliationItem> ListByRun(Guid runId);
 }
 
+public sealed record BranchReportPersistedMetrics(
+    int ReviewCount,
+    PeriodLifecycleStatus LifecycleStatus,
+    Litres SupplierLitres,
+    Litres BranchLitres,
+    Litres BilledLitres,
+    Litres UnbilledLitres,
+    MoneyAmount EstimatedRecovery);
+
 public interface IBranchReportRepository
 {
     void Save(BranchReportVersion report, BranchSummary? summary = null);
@@ -29,6 +38,25 @@ public interface IBranchReportRepository
     BranchReportVersion? GetById(Guid id);
 
     IReadOnlyList<BranchReportVersion> ListByRunAndBranch(Guid runId, CanonicalBranchId branchId);
+
+    /// <summary>
+    /// Reads persisted totals captured when the branch report version row was inserted (SQLite BranchReports).
+    /// </summary>
+    BranchReportPersistedMetrics? GetPersistedMetrics(Guid branchReportVersionId);
+}
+
+public interface IBranchReportNoteRepository
+{
+    void Save(BranchReportNote note);
+
+    IReadOnlyList<BranchReportNote> ListByBranchReport(Guid branchReportVersionId);
+}
+
+public interface IBranchReportApprovalRepository
+{
+    void Save(BranchReportApprovalRecord approval);
+
+    BranchReportApprovalRecord? FindByBranchReport(Guid branchReportVersionId);
 }
 
 public interface IPdfExportRepository

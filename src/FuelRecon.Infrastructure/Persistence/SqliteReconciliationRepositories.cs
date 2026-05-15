@@ -335,6 +335,39 @@ public sealed class SqliteBranchReportRepository(SqliteConnectionFactory connect
         return reports;
     }
 
+    public BranchReportPersistedMetrics? GetPersistedMetrics(Guid branchReportVersionId)
+    {
+        using var connection = connectionFactory.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT ReviewCount, Status, SupplierLitres, BranchLitres, BilledLitres, UnbilledLitres, EstimatedRecovery
+            FROM BranchReports
+            WHERE Id = $id;
+            """;
+        command.Parameters.AddWithValue("$id", branchReportVersionId.ToString());
+        using var reader = command.ExecuteReader();
+        if (!reader.Read())
+        {
+            return null;
+        }
+
+        static Litres ReadLitres(SqliteDataReader r, int ordinal) =>
+            r.IsDBNull(ordinal) ? new Litres(0m) : new Litres(r.GetDecimalValue(ordinal));
+
+        var estimated = reader.IsDBNull(6)
+            ? new MoneyAmount(0m)
+            : new MoneyAmount(reader.GetDecimalValue(6));
+
+        return new BranchReportPersistedMetrics(
+            reader.GetInt32(0),
+            Enum.Parse<PeriodLifecycleStatus>(reader.GetString(1)),
+            ReadLitres(reader, 2),
+            ReadLitres(reader, 3),
+            ReadLitres(reader, 4),
+            ReadLitres(reader, 5),
+            estimated);
+    }
+
     private const string BranchReportSelectSql = """
         SELECT Id, RunId, BranchId, PeriodId, VersionNumber, CreatedAtUtc, CreatedBy, Status, Notes
         FROM BranchReports
@@ -351,6 +384,116 @@ public sealed class SqliteBranchReportRepository(SqliteConnectionFactory connect
             reader.GetString(6),
             Enum.Parse<PeriodLifecycleStatus>(reader.GetString(7)),
             reader.GetNullableString(8));
+}
+
+public sealed class SqliteBranchReportNoteRepository(SqliteConnectionFactory connectionFactory) : IBranchReportNoteRepository
+{
+    public void Save(BranchReportNote note)
+    {
+        using var connection = connectionFactory.OpenConnection();
+        using var transaction = connection.BeginTransaction();
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO BranchReportNotes (
+                Id, BranchReportId, CreatedAtUtc, CreatedBy, NoteText, ReasonCode
+            )
+            VALUES (
+                $id, $branchReportId, $createdAtUtc, $createdBy, $noteText, $reasonCode
+            );
+            """;
+        command.Parameters.AddWithValue("$id", note.Id.ToString());
+        command.Parameters.AddWithValue("$branchReportId", note.BranchReportVersionId.ToString());
+        command.Parameters.AddWithValue("$createdAtUtc", SqliteRepositoryHelpers.ToIsoString(note.CreatedAtUtc));
+        command.Parameters.AddWithValue("$createdBy", note.CreatedBy);
+        command.Parameters.AddWithValue("$noteText", note.NoteText);
+        command.Parameters.AddWithNullableValue("$reasonCode", note.ReasonCode);
+        command.ExecuteNonQuery();
+        transaction.Commit();
+    }
+
+    public IReadOnlyList<BranchReportNote> ListByBranchReport(Guid branchReportVersionId)
+    {
+        using var connection = connectionFactory.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT Id, BranchReportId, CreatedAtUtc, CreatedBy, NoteText, ReasonCode
+            FROM BranchReportNotes
+            WHERE BranchReportId = $branchReportId
+            ORDER BY CreatedAtUtc, Id;
+            """;
+        command.Parameters.AddWithValue("$branchReportId", branchReportVersionId.ToString());
+        using var reader = command.ExecuteReader();
+        var notes = new List<BranchReportNote>();
+        while (reader.Read())
+        {
+            notes.Add(ReadNote(reader));
+        }
+
+        return notes;
+    }
+
+    private static BranchReportNote ReadNote(SqliteDataReader reader) =>
+        new(
+            Guid.Parse(reader.GetString(0)),
+            Guid.Parse(reader.GetString(1)),
+            DateTimeOffset.Parse(reader.GetString(2), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
+            reader.GetString(3),
+            reader.GetString(4),
+            reader.GetNullableString(5));
+}
+
+public sealed class SqliteBranchReportApprovalRepository(SqliteConnectionFactory connectionFactory)
+    : IBranchReportApprovalRepository
+{
+    public void Save(BranchReportApprovalRecord approval)
+    {
+        using var connection = connectionFactory.OpenConnection();
+        using var transaction = connection.BeginTransaction();
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO BranchReportApprovals (
+                Id, BranchReportId, RunId, ApprovedAtUtc, ApprovedBy, ApprovalNote, SnapshotJson
+            )
+            VALUES (
+                $id, $branchReportId, $runId, $approvedAtUtc, $approvedBy, $approvalNote, $snapshotJson
+            );
+            """;
+        command.Parameters.AddWithValue("$id", approval.Id.ToString());
+        command.Parameters.AddWithValue("$branchReportId", approval.BranchReportVersionId.ToString());
+        command.Parameters.AddWithValue("$runId", approval.RunId.ToString());
+        command.Parameters.AddWithValue("$approvedAtUtc", SqliteRepositoryHelpers.ToIsoString(approval.ApprovedAtUtc));
+        command.Parameters.AddWithValue("$approvedBy", approval.ApprovedBy);
+        command.Parameters.AddWithNullableValue("$approvalNote", approval.ApprovalNote);
+        command.Parameters.AddWithValue("$snapshotJson", approval.SnapshotJson);
+        command.ExecuteNonQuery();
+        transaction.Commit();
+    }
+
+    public BranchReportApprovalRecord? FindByBranchReport(Guid branchReportVersionId)
+    {
+        using var connection = connectionFactory.OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT Id, BranchReportId, RunId, ApprovedAtUtc, ApprovedBy, ApprovalNote, SnapshotJson
+            FROM BranchReportApprovals
+            WHERE BranchReportId = $branchReportId;
+            """;
+        command.Parameters.AddWithValue("$branchReportId", branchReportVersionId.ToString());
+        using var reader = command.ExecuteReader();
+        return reader.Read() ? ReadApproval(reader) : null;
+    }
+
+    private static BranchReportApprovalRecord ReadApproval(SqliteDataReader reader) =>
+        new(
+            Guid.Parse(reader.GetString(0)),
+            Guid.Parse(reader.GetString(1)),
+            Guid.Parse(reader.GetString(2)),
+            DateTimeOffset.Parse(reader.GetString(3), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
+            reader.GetString(4),
+            reader.GetString(6),
+            reader.GetNullableString(5));
 }
 
 public sealed class SqlitePdfExportRepository(SqliteConnectionFactory connectionFactory) : IPdfExportRepository

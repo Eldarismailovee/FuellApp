@@ -6,6 +6,8 @@ public static class SqliteSchemaMigrator
 {
     public const string InitialSchemaMigrationId = "001_initial_schema";
 
+    public const string Migration002BranchReportNotesAndApprovalsId = "002_branch_report_notes_and_approvals";
+
     public static void ApplyInitialSchema(SqliteConnection connection)
     {
         ArgumentNullException.ThrowIfNull(connection);
@@ -31,21 +33,17 @@ public static class SqliteSchemaMigrator
             schemaCommand.CommandText = SqliteSchema.InitialSchema;
             schemaCommand.ExecuteNonQuery();
 
-            using var insertMigrationCommand = connection.CreateCommand();
-            insertMigrationCommand.Transaction = transaction;
-            insertMigrationCommand.CommandText = """
-                INSERT INTO SchemaMigrations (
-                    Id,
-                    AppliedAtUtc
-                )
-                VALUES (
-                    $id,
-                    $appliedAtUtc
-                );
-                """;
-            insertMigrationCommand.Parameters.AddWithValue("$id", InitialSchemaMigrationId);
-            insertMigrationCommand.Parameters.AddWithValue("$appliedAtUtc", DateTimeOffset.UtcNow.ToString("O"));
-            insertMigrationCommand.ExecuteNonQuery();
+            InsertMigrationRow(connection, transaction, InitialSchemaMigrationId);
+        }
+
+        if (!HasMigration(connection, transaction, Migration002BranchReportNotesAndApprovalsId))
+        {
+            using var migrationCommand = connection.CreateCommand();
+            migrationCommand.Transaction = transaction;
+            migrationCommand.CommandText = SqliteSchema.Migration002BranchReportNotesAndApprovals;
+            migrationCommand.ExecuteNonQuery();
+
+            InsertMigrationRow(connection, transaction, Migration002BranchReportNotesAndApprovalsId);
         }
 
         transaction.Commit();
@@ -57,6 +55,25 @@ public static class SqliteSchemaMigrator
 
         using var connection = connectionFactory.OpenConnection();
         ApplyInitialSchema(connection);
+    }
+
+    private static void InsertMigrationRow(SqliteConnection connection, SqliteTransaction transaction, string migrationId)
+    {
+        using var insertMigrationCommand = connection.CreateCommand();
+        insertMigrationCommand.Transaction = transaction;
+        insertMigrationCommand.CommandText = """
+            INSERT INTO SchemaMigrations (
+                Id,
+                AppliedAtUtc
+            )
+            VALUES (
+                $id,
+                $appliedAtUtc
+            );
+            """;
+        insertMigrationCommand.Parameters.AddWithValue("$id", migrationId);
+        insertMigrationCommand.Parameters.AddWithValue("$appliedAtUtc", DateTimeOffset.UtcNow.ToString("O"));
+        insertMigrationCommand.ExecuteNonQuery();
     }
 
     private static bool HasMigration(SqliteConnection connection, SqliteTransaction transaction, string migrationId)

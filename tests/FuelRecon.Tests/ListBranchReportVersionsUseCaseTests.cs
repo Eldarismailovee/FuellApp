@@ -57,6 +57,8 @@ public class ListBranchReportVersionsUseCaseTests
         public BranchReportVersion? GetById(Guid id) =>
             _reports.FirstOrDefault(report => report.Id == id);
 
+        public BranchReportPersistedMetrics? GetPersistedMetrics(Guid branchReportVersionId) => null;
+
         public IReadOnlyList<BranchReportVersion> ListByRunAndBranch(Guid runId, CanonicalBranchId branchId) =>
             _reports
                 .Where(report => report.RunId == runId && report.BranchId.Value == branchId.Value)

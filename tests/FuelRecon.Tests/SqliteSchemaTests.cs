@@ -26,6 +26,36 @@ public class SqliteSchemaTests
         Assert.Contains("PdfExports", tables);
         Assert.Contains("AuditRecords", tables);
         Assert.Contains("SettingsSnapshots", tables);
+        Assert.Contains("SchemaMigrations", tables);
+        Assert.Contains("BranchReportNotes", tables);
+        Assert.Contains("BranchReportApprovals", tables);
+    }
+
+    [Fact]
+    public void Schema_migrations_table_records_initial_and_branch_notes_migrations()
+    {
+        using var connection = CreateDatabase();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT Id
+            FROM SchemaMigrations
+            ORDER BY Id;
+            """;
+
+        using var reader = command.ExecuteReader();
+        var ids = new List<string>();
+        while (reader.Read())
+        {
+            ids.Add(reader.GetString(0));
+        }
+
+        Assert.Equal(
+            [
+                SqliteSchemaMigrator.InitialSchemaMigrationId,
+                SqliteSchemaMigrator.Migration002BranchReportNotesAndApprovalsId,
+            ],
+            ids);
     }
 
     [Fact]
@@ -85,6 +115,9 @@ public class SqliteSchemaTests
     [InlineData("ManualActions", "ReconciliationItemId", "ReconciliationItems")]
     [InlineData("BranchReports", "RunId", "ReconciliationRuns")]
     [InlineData("PdfExports", "BranchReportId", "BranchReports")]
+    [InlineData("BranchReportNotes", "BranchReportId", "BranchReports")]
+    [InlineData("BranchReportApprovals", "BranchReportId", "BranchReports")]
+    [InlineData("BranchReportApprovals", "RunId", "ReconciliationRuns")]
     public void Initial_schema_contains_practical_foreign_keys(string tableName, string fromColumn, string referencedTable)
     {
         using var connection = CreateDatabase();
@@ -132,6 +165,10 @@ public class SqliteSchemaTests
     [InlineData("TR_PdfExports_PreventDelete")]
     [InlineData("TR_AuditRecords_PreventUpdate")]
     [InlineData("TR_AuditRecords_PreventDelete")]
+    [InlineData("TR_BranchReportNotes_PreventUpdate")]
+    [InlineData("TR_BranchReportNotes_PreventDelete")]
+    [InlineData("TR_BranchReportApprovals_PreventUpdate")]
+    [InlineData("TR_BranchReportApprovals_PreventDelete")]
     public void Initial_schema_contains_append_only_triggers(string triggerName)
     {
         using var connection = CreateDatabase();
