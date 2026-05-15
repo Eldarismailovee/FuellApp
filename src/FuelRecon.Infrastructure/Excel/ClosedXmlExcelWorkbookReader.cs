@@ -14,7 +14,7 @@ public sealed class ClosedXmlExcelWorkbookReader : IExcelWorkbookReader
 
     public const string ExcelReadFailedReasonCode = "ExcelReadFailed";
 
-    public ExcelWorkbookReadResult ReadWorkbook(string filePath)
+    public ExcelWorkbookReadResult ReadWorkbook(string filePath, ExcelWorkbookReadOptions? options = null)
     {
         if (string.IsNullOrWhiteSpace(filePath))
         {
@@ -35,9 +35,11 @@ public sealed class ClosedXmlExcelWorkbookReader : IExcelWorkbookReader
 
         try
         {
+            var effectiveOptions = options ?? new ExcelWorkbookReadOptions();
+
             using var workbook = new XLWorkbook(filePath);
             var sheets = workbook.Worksheets
-                .Select(worksheet => ReadSheet(filePath, worksheet))
+                .Select(worksheet => ReadSheet(filePath, worksheet, effectiveOptions))
                 .ToArray();
 
             return ExcelWorkbookReadResult.Succeeded(new ExcelWorkbookModel(filePath, sheets));
@@ -50,7 +52,7 @@ public sealed class ClosedXmlExcelWorkbookReader : IExcelWorkbookReader
         }
     }
 
-    private static ExcelSheetModel ReadSheet(string sourceFile, IXLWorksheet worksheet)
+    private static ExcelSheetModel ReadSheet(string sourceFile, IXLWorksheet worksheet, ExcelWorkbookReadOptions options)
     {
         var range = worksheet.RangeUsed();
         if (range is null)
@@ -63,7 +65,7 @@ public sealed class ClosedXmlExcelWorkbookReader : IExcelWorkbookReader
         var firstColumnNumber = range.RangeAddress.FirstAddress.ColumnNumber;
         var lastColumnNumber = range.RangeAddress.LastAddress.ColumnNumber;
 
-        var headerRowNumber = FindHeaderRowNumber(worksheet, firstRowNumber, lastRowNumber, firstColumnNumber, lastColumnNumber);
+        var headerRowNumber = ResolveHeaderRowNumber(worksheet, firstRowNumber, lastRowNumber, firstColumnNumber, lastColumnNumber, options.HeaderDetectionKind);
         if (headerRowNumber is null)
         {
             return new ExcelSheetModel(sourceFile, worksheet.Name, HeaderRowNumber: 0, [], []);
@@ -97,7 +99,33 @@ public sealed class ClosedXmlExcelWorkbookReader : IExcelWorkbookReader
         return new ExcelSheetModel(sourceFile, worksheet.Name, headerRowNumber.Value, headers, rows);
     }
 
-    private static int? FindHeaderRowNumber(
+    private static int? ResolveHeaderRowNumber(
+        IXLWorksheet worksheet,
+        int firstRowNumber,
+        int lastRowNumber,
+        int firstColumnNumber,
+        int lastColumnNumber,
+        ExcelWorkbookHeaderDetectionKind detectionKind)
+    {
+        return detectionKind switch
+        {
+            ExcelWorkbookHeaderDetectionKind.BranchLitres => ExcelHeaderRowDetector.FindBranchLitresHeaderRow(
+                worksheet,
+                firstRowNumber,
+                lastRowNumber,
+                firstColumnNumber,
+                lastColumnNumber),
+            ExcelWorkbookHeaderDetectionKind.CarsBilling => ExcelHeaderRowDetector.FindCarsBillingHeaderRow(
+                worksheet,
+                firstRowNumber,
+                lastRowNumber,
+                firstColumnNumber,
+                lastColumnNumber),
+            _ => FindFirstNonEmptyRow(worksheet, firstRowNumber, lastRowNumber, firstColumnNumber, lastColumnNumber),
+        };
+    }
+
+    private static int? FindFirstNonEmptyRow(
         IXLWorksheet worksheet,
         int firstRowNumber,
         int lastRowNumber,
@@ -106,11 +134,11 @@ public sealed class ClosedXmlExcelWorkbookReader : IExcelWorkbookReader
     {
         for (var rowNumber = firstRowNumber; rowNumber <= lastRowNumber; rowNumber++)
         {
-            var hasHeader = Enumerable
+            var hasNonEmptyCell = Enumerable
                 .Range(firstColumnNumber, lastColumnNumber - firstColumnNumber + 1)
                 .Any(columnNumber => !string.IsNullOrWhiteSpace(ReadCellText(worksheet.Cell(rowNumber, columnNumber))));
 
-            if (hasHeader)
+            if (hasNonEmptyCell)
             {
                 return rowNumber;
             }

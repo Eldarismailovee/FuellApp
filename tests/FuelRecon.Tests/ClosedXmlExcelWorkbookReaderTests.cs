@@ -1,4 +1,5 @@
 using ClosedXML.Excel;
+using FuelRecon.Application.Excel;
 using FuelRecon.Infrastructure.Excel;
 
 namespace FuelRecon.Tests;
@@ -50,6 +51,76 @@ public class ClosedXmlExcelWorkbookReaderTests
         var secondRow = sheetModel.Rows[1];
         Assert.Equal(4, secondRow.RowNumber);
         Assert.Equal("Rotorua", secondRow.Cells[0].RawText);
+    }
+
+    [Fact]
+    public void ReadWorkbook_with_branch_litres_header_detection_skips_metadata_before_header_row()
+    {
+        using var tempFile = TemporaryExcelFile.Create(".xlsx");
+        using (var workbook = new XLWorkbook())
+        {
+            var sheet = workbook.Worksheets.Add("Litres");
+            sheet.Cell(1, 1).Value = "Metadata title";
+            sheet.Cell(2, 2).Value = "More preamble";
+            sheet.Cell(3, 1).Value = "Yet another note";
+
+            sheet.Cell(4, 1).Value = "Transaction Date";
+            sheet.Cell(4, 2).Value = "Qty";
+            sheet.Cell(4, 3).Value = "Plate";
+
+            sheet.Cell(5, 1).Value = "2026-04-02";
+            sheet.Cell(5, 2).Value = "9";
+            sheet.Cell(5, 3).Value = "aa-11";
+
+            workbook.SaveAs(tempFile.Path);
+        }
+
+        var reader = new ClosedXmlExcelWorkbookReader();
+        var result = reader.ReadWorkbook(
+            tempFile.Path,
+            new ExcelWorkbookReadOptions(ExcelWorkbookHeaderDetectionKind.BranchLitres));
+
+        Assert.True(result.Success);
+        var sheetModel = Assert.Single(result.Workbook!.Sheets);
+        Assert.Equal(4, sheetModel.HeaderRowNumber);
+        Assert.Equal(["Transaction Date", "Qty", "Plate"], sheetModel.Headers);
+        var row = Assert.Single(sheetModel.Rows);
+        Assert.Equal(5, row.RowNumber);
+        Assert.Equal("aa-11", row.Cells[2].RawText);
+    }
+
+    [Fact]
+    public void ReadWorkbook_with_cars_billing_header_detection_skips_metadata_before_header_row()
+    {
+        using var tempFile = TemporaryExcelFile.Create(".xlsx");
+        using (var workbook = new XLWorkbook())
+        {
+            var sheet = workbook.Worksheets.Add("Cars");
+            sheet.Cell(1, 1).Value = "Statement preamble";
+            sheet.Cell(2, 2).Value = "Extra notes";
+            sheet.Cell(3, 1).Value = "Noise";
+
+            sheet.Cell(4, 1).Value = "Registration";
+            sheet.Cell(4, 2).Value = "Total";
+
+            sheet.Cell(5, 1).Value = "bb-22";
+            sheet.Cell(5, 2).Value = "$44.44";
+
+            workbook.SaveAs(tempFile.Path);
+        }
+
+        var reader = new ClosedXmlExcelWorkbookReader();
+        var result = reader.ReadWorkbook(
+            tempFile.Path,
+            new ExcelWorkbookReadOptions(ExcelWorkbookHeaderDetectionKind.CarsBilling));
+
+        Assert.True(result.Success);
+        var sheetModel = Assert.Single(result.Workbook!.Sheets);
+        Assert.Equal(4, sheetModel.HeaderRowNumber);
+        Assert.Equal(["Registration", "Total"], sheetModel.Headers);
+        var row = Assert.Single(sheetModel.Rows);
+        Assert.Equal(5, row.RowNumber);
+        Assert.Equal("$44.44", row.Cells[1].RawText);
     }
 
     [Fact]

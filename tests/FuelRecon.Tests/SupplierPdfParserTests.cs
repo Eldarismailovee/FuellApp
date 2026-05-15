@@ -6,6 +6,12 @@ namespace FuelRecon.Tests;
 
 public class SupplierPdfParserTests
 {
+    /// <summary>
+    /// Representative merged Mobil token sequence as produced by CLI / flattened PDF text extraction.
+    /// </summary>
+    private const string MobilMergedBlobCliSample =
+        "02/04/2612:56Mobil Junction0578787.74LSynergy ExtraUnleaded3.45 R3.330.9325.773.36";
+
     [Fact]
     public void Parse_generated_mobil_pdf_extracts_transaction_and_source_reference()
     {
@@ -154,6 +160,68 @@ public class SupplierPdfParserTests
         Assert.Equal(1, entry.SourceReference.PageNumber);
     }
 
+    [Fact]
+    public void Parse_mobil_slash_date_blob_splits_multiple_transactions_without_line_breaks()
+    {
+        using var tempFile = TemporaryFile.Create(".pdf");
+        WriteSimplePdf(
+            tempFile.Path,
+            "Mobil Statement CARD NO: 999 NAME: HERTZ TAUPO 1/2 " +
+            "05/04/2026 Diesel 10.00 L $20.00 " +
+            "06/04/2026 Petrol 11.50 L $25.00");
+
+        var result = CreateParser().Parse(tempFile.Path, new FuelPeriod(2026, 4), CreateBranchAliasResolver());
+
+        Assert.True(result.Success);
+        Assert.Equal(2, result.Entries.Count);
+        Assert.Contains(result.Entries, entry => entry.TransactionDate == new DateOnly(2026, 4, 5) && entry.Litres.Value == 10.00m);
+        Assert.Contains(result.Entries, entry => entry.TransactionDate == new DateOnly(2026, 4, 6) && entry.Litres.Value == 11.50m);
+        Assert.All(result.Entries, entry => Assert.Equal("TAUPO", entry.BranchId?.Value));
+    }
+
+    [Fact]
+    public void Parse_mobil_inline_quantity_before_product_when_litres_suffix_missing()
+    {
+        using var tempFile = TemporaryFile.Create(".pdf");
+        WriteSimplePdf(
+            tempFile.Path,
+            "Mobil Statement\n07/04/2026 Mobil Taupo REF 111 42.12 Diesel $88.00");
+
+        var result = CreateParser().Parse(tempFile.Path, new FuelPeriod(2026, 4), CreateBranchAliasResolver());
+
+        Assert.True(result.Success);
+        var entry = Assert.Single(result.Entries);
+        Assert.Equal(new DateOnly(2026, 4, 7), entry.TransactionDate);
+        Assert.Equal(42.12m, entry.Litres.Value);
+        Assert.Equal("Diesel", entry.Product);
+        Assert.Equal("TAUPO", entry.BranchId?.Value);
+    }
+
+    [Fact]
+    public void Parse_mobil_merged_cli_blob_splits_slash_two_digit_year_time_litres_and_voucher()
+    {
+        using var tempFile = TemporaryFile.Create(".pdf");
+        WriteSimplePdf(tempFile.Path, $"Mobil Statement\n{MobilMergedBlobCliSample}");
+
+        var result = CreateParser().Parse(tempFile.Path, new FuelPeriod(2026, 4), CreateBranchAliasResolver());
+
+        Assert.True(result.Success);
+        Assert.False(result.HasErrors);
+        var entry = Assert.Single(result.Entries);
+        Assert.Equal("Mobil", entry.SupplierName);
+        Assert.Equal(new DateOnly(2026, 4, 2), entry.TransactionDate);
+        Assert.Equal(7.74m, entry.Litres.Value);
+        Assert.Equal("057878", entry.VoucherOrInvoiceReference);
+        Assert.Equal("Mobil Junction", entry.RawSiteText);
+        Assert.Equal("JUNCTION", entry.BranchId?.Value);
+        Assert.Contains("Synergy Extra Unleaded", entry.Product ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        // ReferenceText uses Mobil blob spacing normalisation (e.g. L Synergy) vs raw CLI extraction.
+        Assert.Contains("02/04/2612:56Mobil Junction0578787.74L", entry.SourceReference.ReferenceText, StringComparison.Ordinal);
+        Assert.Contains("Synergy Extra Unleaded", entry.SourceReference.ReferenceText, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(tempFile.Path, entry.SourceReference.SourceFile);
+        Assert.Equal(1, entry.SourceReference.PageNumber);
+    }
+
     [Theory]
     [InlineData("Farmlands Statement April.PDF")]
     [InlineData("Mobile - Taupo.pdf")]
@@ -198,14 +266,16 @@ public class SupplierPdfParserTests
         var taupo = new BranchMaster(new CanonicalBranchId("TAUPO"), "Taupo");
         var kerikeri = new BranchMaster(new CanonicalBranchId("KERIKERI"), "Kerikeri");
         var whangarei = new BranchMaster(new CanonicalBranchId("WHANGAREI"), "Whangarei");
+        var junction = new BranchMaster(new CanonicalBranchId("JUNCTION"), "Mobil Junction");
         return new BranchAliasResolver(
-            [taupo, kerikeri, whangarei],
+            [taupo, kerikeri, whangarei, junction],
             [
                 new BranchAlias("Mobil Taupo", taupo.Id),
                 new BranchAlias("Mobile - Taupo", taupo.Id),
                 new BranchAlias("Taupo", taupo.Id),
                 new BranchAlias("Hertz Taupo", taupo.Id),
                 new BranchAlias("HERTZ TAUPO", taupo.Id),
+                new BranchAlias("Mobil Junction", junction.Id),
                 new BranchAlias("Caltex Kerikeri", kerikeri.Id),
                 new BranchAlias("Caltex Whangarei", whangarei.Id),
             ]);

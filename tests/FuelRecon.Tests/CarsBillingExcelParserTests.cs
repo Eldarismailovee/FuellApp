@@ -121,6 +121,77 @@ public class CarsBillingExcelParserTests
     }
 
     [Fact]
+    public void Parse_ignores_totals_sheets_and_matches_headers_when_labels_include_punctuation()
+    {
+        using var tempFile = TemporaryExcelFile.Create();
+        using (var workbook = new XLWorkbook())
+        {
+            var totals = workbook.Worksheets.Add("Totals");
+            totals.Cell(1, 1).Value = "Ignore";
+
+            var sheet = workbook.Worksheets.Add("Cars Data");
+            sheet.Cell(1, 1).Value = "Site:";
+            sheet.Cell(1, 2).Value = "Inv Date!";
+            sheet.Cell(1, 3).Value = "Agreement #";
+            sheet.Cell(1, 4).Value = "Plate.";
+            sheet.Cell(1, 5).Value = "Qty:";
+            sheet.Cell(1, 6).Value = "Charge";
+            sheet.Cell(1, 7).Value = "Bill Status";
+
+            sheet.Cell(2, 1).Value = "Taupo";
+            sheet.Cell(2, 2).Value = "01/04/2026";
+            sheet.Cell(2, 3).Value = "RA-9";
+            sheet.Cell(2, 4).Value = "zz-88";
+            sheet.Cell(2, 5).Value = "6";
+            sheet.Cell(2, 6).Value = "$12.34";
+            sheet.Cell(2, 7).Value = "Open";
+
+            workbook.SaveAs(tempFile.Path);
+        }
+
+        var result = CreateParser().Parse(tempFile.Path, new FuelPeriod(2026, 4), CreateBranchAliasResolver());
+
+        Assert.True(result.Success);
+        var entry = Assert.Single(result.Entries);
+        Assert.Equal("Cars Data", entry.SourceReference.SheetName);
+        Assert.Equal("TAUPO", entry.BranchId?.Value);
+        Assert.Equal(6m, entry.BilledLitres?.Value);
+        Assert.Equal(12.34m, entry.BilledAmount?.Value);
+        Assert.Equal("Open", entry.BillingStatus);
+        Assert.DoesNotContain(result.Issues, issue => issue.SourceReference?.SheetName == "Totals");
+    }
+
+    [Fact]
+    public void Parse_skips_leading_metadata_rows_when_headers_are_on_row_four()
+    {
+        using var tempFile = TemporaryExcelFile.Create();
+        using (var workbook = new XLWorkbook())
+        {
+            var sheet = workbook.Worksheets.Add("Cars Detail");
+            sheet.Cell(1, 1).Value = "Cars+ billing recon — internal only";
+            sheet.Cell(2, 2).Value = "Exported by AP";
+            sheet.Cell(3, 1).Value = "Confidential metadata row";
+
+            sheet.Cell(4, 1).Value = "RA";
+            sheet.Cell(4, 2).Value = "Charge";
+
+            sheet.Cell(5, 1).Value = "RA-707";
+            sheet.Cell(5, 2).Value = "$99.10";
+
+            workbook.SaveAs(tempFile.Path);
+        }
+
+        var result = CreateParser().Parse(tempFile.Path, new FuelPeriod(2026, 4), CreateBranchAliasResolver());
+
+        Assert.True(result.Success);
+        var entry = Assert.Single(result.Entries);
+        Assert.Equal(5, entry.SourceReference.RowNumber);
+        Assert.Null(entry.BranchId);
+        Assert.Equal("RA707", entry.RentalAgreementNumber?.NormalisedValue);
+        Assert.Equal(99.10m, entry.BilledAmount?.Value);
+    }
+
+    [Fact]
     public void Parse_reports_missing_required_columns()
     {
         using var tempFile = TemporaryExcelFile.Create();
@@ -144,7 +215,7 @@ public class CarsBillingExcelParserTests
         Assert.Equal(CarsBillingExcelParser.MissingRequiredColumnsReasonCode, issue.ReasonCode);
         Assert.Equal(tempFile.Path, issue.SourceReference?.SourceFile);
         Assert.Equal("Missing", issue.SourceReference?.SheetName);
-        Assert.Equal(1, issue.SourceReference?.RowNumber);
+        Assert.Null(issue.SourceReference?.RowNumber);
     }
 
     [Fact]

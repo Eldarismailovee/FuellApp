@@ -7,7 +7,7 @@ public sealed class CarsBillingExcelParser(IExcelWorkbookReader workbookReader) 
 {
     public const string MissingRequiredColumnsReasonCode = "MissingRequiredColumns";
 
-    public const string MissingIdentifierReasonCode = "MissingRA";
+    public const string MissingIdentifierReasonCode = "MissingIdentifier";
 
     public const string MissingBillingValueReasonCode = "MissingCharge";
 
@@ -15,7 +15,9 @@ public sealed class CarsBillingExcelParser(IExcelWorkbookReader workbookReader) 
     {
         ArgumentNullException.ThrowIfNull(branchAliasResolver);
 
-        var workbookResult = workbookReader.ReadWorkbook(filePath);
+        var workbookResult = workbookReader.ReadWorkbook(
+            filePath,
+            new ExcelWorkbookReadOptions(ExcelWorkbookHeaderDetectionKind.CarsBilling));
         if (!workbookResult.Success || workbookResult.Workbook is null)
         {
             return CarsBillingParseResult.From(
@@ -34,7 +36,7 @@ public sealed class CarsBillingExcelParser(IExcelWorkbookReader workbookReader) 
         var issues = new List<CarsBillingParseIssue>();
         var rowCount = 0;
 
-        foreach (var sheet in workbookResult.Workbook.Sheets)
+        foreach (var sheet in workbookResult.Workbook.Sheets.Where(sheet => !ExcelSheetFilter.IsNonDataSheet(sheet.SheetName)))
         {
             var columns = CarsBillingColumns.From(sheet.Headers);
             if (!columns.HasMinimumRequiredColumns)
@@ -313,38 +315,17 @@ internal sealed record CarsBillingColumns(
     int? BilledAmountColumnIndex,
     int? StatusColumnIndex)
 {
-    private static readonly string[] BranchHeaders = ["Branch", "Location", "Depot"];
-    private static readonly string[] DateHeaders = ["Date", "Billing Date", "Transaction Date", "Period"];
-    private static readonly string[] RentalAgreementHeaders = ["RA", "Rental Agreement", "Rental Agreement Number"];
-    private static readonly string[] RegoHeaders = ["Rego", "Registration", "Plate"];
-    private static readonly string[] BilledLitresHeaders = ["Billed Litres", "Litres", "Qty", "Quantity"];
-    private static readonly string[] BilledAmountHeaders = ["Amount", "Billed Amount", "Charge", "Total"];
-    private static readonly string[] StatusHeaders = ["Status", "Billing Status", "Invoice Status"];
-
     public bool HasMinimumRequiredColumns =>
         (RentalAgreementColumnIndex is not null || RegoColumnIndex is not null)
         && (BilledLitresColumnIndex is not null || BilledAmountColumnIndex is not null || StatusColumnIndex is not null);
 
     public static CarsBillingColumns From(IReadOnlyList<string> headers) =>
         new(
-            FindHeaderIndex(headers, BranchHeaders),
-            FindHeaderIndex(headers, DateHeaders),
-            FindHeaderIndex(headers, RentalAgreementHeaders),
-            FindHeaderIndex(headers, RegoHeaders),
-            FindHeaderIndex(headers, BilledLitresHeaders),
-            FindHeaderIndex(headers, BilledAmountHeaders),
-            FindHeaderIndex(headers, StatusHeaders));
-
-    private static int? FindHeaderIndex(IReadOnlyList<string> headers, IReadOnlyCollection<string> variants)
-    {
-        for (var index = 0; index < headers.Count; index++)
-        {
-            if (variants.Any(variant => string.Equals(headers[index].Trim(), variant, StringComparison.OrdinalIgnoreCase)))
-            {
-                return index;
-            }
-        }
-
-        return null;
-    }
+            ExcelColumnHeaderMatcher.FindFirstMatchingColumn(headers, ExcelParserKnownHeaders.CarsBilling.Branch),
+            ExcelColumnHeaderMatcher.FindFirstMatchingColumn(headers, ExcelParserKnownHeaders.CarsBilling.Date),
+            ExcelColumnHeaderMatcher.FindFirstMatchingColumn(headers, ExcelParserKnownHeaders.CarsBilling.RentalAgreement),
+            ExcelColumnHeaderMatcher.FindFirstMatchingColumn(headers, ExcelParserKnownHeaders.CarsBilling.Rego),
+            ExcelColumnHeaderMatcher.FindFirstMatchingColumn(headers, ExcelParserKnownHeaders.CarsBilling.BilledLitres),
+            ExcelColumnHeaderMatcher.FindFirstMatchingColumn(headers, ExcelParserKnownHeaders.CarsBilling.BilledAmount),
+            ExcelColumnHeaderMatcher.FindFirstMatchingColumn(headers, ExcelParserKnownHeaders.CarsBilling.Status));
 }

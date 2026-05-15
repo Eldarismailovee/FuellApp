@@ -53,21 +53,18 @@ public class ProcessFuelReconciliationRealSampleIntegrationTests
         Assert.NotNull(importedBatch);
         Assert.Equal(3, importedFiles.Count);
 
-        if (result.ImportValidationResult.Success)
-        {
-            Assert.NotNull(result.ReconciliationEngineResult);
-            Assert.NotNull(result.ReconciliationPersistenceResponse);
-            Assert.NotEqual(Guid.Empty, result.ReconciliationPersistenceResponse.RunId);
+        Assert.True(result.ImportValidationResult.Success);
+        Assert.NotEmpty(result.ImportValidationResult.SupplierTransactions);
+        Assert.NotEmpty(result.ImportValidationResult.BranchLitresEntries);
+        Assert.NotEmpty(result.ImportValidationResult.CarsBillingEntries);
 
-            var persistedRun = runRepository.GetById(result.ReconciliationPersistenceResponse.RunId);
-            Assert.NotNull(persistedRun);
-            Assert.Equal(result.ReconciliationEngineResult.Run.Id, persistedRun.Id);
-        }
-        else
-        {
-            Assert.Null(result.ReconciliationEngineResult);
-            Assert.Null(result.ReconciliationPersistenceResponse);
-        }
+        Assert.NotNull(result.ReconciliationEngineResult);
+        Assert.NotNull(result.ReconciliationPersistenceResponse);
+        Assert.NotEqual(Guid.Empty, result.ReconciliationPersistenceResponse.RunId);
+
+        var persistedRun = runRepository.GetById(result.ReconciliationPersistenceResponse.RunId);
+        Assert.NotNull(persistedRun);
+        Assert.Equal(result.ReconciliationEngineResult.Run.Id, persistedRun.Id);
     }
 
     private static ProcessFuelReconciliationUseCase CreateUseCase(SqliteConnectionFactory connectionFactory)

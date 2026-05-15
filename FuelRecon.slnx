@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/FuelRecon.Application/FuelRecon.Application.csproj" />
+    <Project Path="src/FuelRecon.Cli/FuelRecon.Cli.csproj" />
     <Project Path="src/FuelRecon.Domain/FuelRecon.Domain.csproj" />
     <Project Path="src/FuelRecon.Infrastructure/FuelRecon.Infrastructure.csproj" />
   </Folder>
