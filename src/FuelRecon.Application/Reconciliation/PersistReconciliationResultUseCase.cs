@@ -2,9 +2,14 @@ using FuelRecon.Application.Persistence;
 
 namespace FuelRecon.Application.Reconciliation;
 
+public interface IPersistReconciliationResultUseCase
+{
+    PersistReconciliationResultResponse Execute(PersistReconciliationResultRequest request);
+}
+
 public sealed class PersistReconciliationResultUseCase(
     IReconciliationRunRepository reconciliationRunRepository,
-    IReconciliationItemRepository reconciliationItemRepository)
+    IReconciliationItemRepository reconciliationItemRepository) : IPersistReconciliationResultUseCase
 {
     public PersistReconciliationResultResponse Execute(PersistReconciliationResultRequest request)
     {

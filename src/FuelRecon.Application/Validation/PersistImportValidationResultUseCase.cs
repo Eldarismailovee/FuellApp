@@ -3,12 +3,17 @@ using FuelRecon.Domain;
 
 namespace FuelRecon.Application.Validation;
 
+public interface IPersistImportValidationResultUseCase
+{
+    PersistImportValidationResultResponse Execute(PersistImportValidationResultRequest request);
+}
+
 public sealed class PersistImportValidationResultUseCase(
     IImportBatchRepository importBatchRepository,
     IImportedFileRepository importedFileRepository,
     ISupplierTransactionRepository supplierTransactionRepository,
     IBranchLitresRepository branchLitresRepository,
-    ICarsBillingRepository carsBillingRepository)
+    ICarsBillingRepository carsBillingRepository) : IPersistImportValidationResultUseCase
 {
     private static readonly FileChecksum PlaceholderChecksum = new("UNAVAILABLE", "UNAVAILABLE");
 

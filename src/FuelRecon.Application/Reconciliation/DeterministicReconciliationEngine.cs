@@ -4,7 +4,12 @@ using FuelRecon.Domain;
 
 namespace FuelRecon.Application.Reconciliation;
 
-public sealed class DeterministicReconciliationEngine
+public interface IReconciliationEngine
+{
+    ReconciliationEngineResult Reconcile(ReconciliationEngineInput input);
+}
+
+public sealed class DeterministicReconciliationEngine : IReconciliationEngine
 {
     public ReconciliationEngineResult Reconcile(ReconciliationEngineInput input)
     {

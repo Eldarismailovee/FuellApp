@@ -4,10 +4,15 @@ using FuelRecon.Domain;
 
 namespace FuelRecon.Application.Validation;
 
+public interface IValidateImportBatchUseCase
+{
+    ImportValidationResult Execute(ValidateImportBatchRequest request);
+}
+
 public sealed class ValidateImportBatchUseCase(
     ISupplierPdfParser supplierPdfParser,
     IBranchLitresExcelParser branchLitresExcelParser,
-    ICarsBillingExcelParser carsBillingExcelParser)
+    ICarsBillingExcelParser carsBillingExcelParser) : IValidateImportBatchUseCase
 {
     public const string MissingMandatoryFileReasonCode = "MissingMandatoryFile";
 
