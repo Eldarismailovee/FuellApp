@@ -411,6 +411,7 @@ public class BranchLitresExcelParserTests
             sheet.Cell(1, 1).Value = "When";
             sheet.Cell(1, 5).Value = "Litres";
             sheet.Cell(2, 1).Value = "01/04/2026";
+            sheet.Cell(2, 2).Value = "NBM929";
             sheet.Cell(2, 5).Value = "52.25";
             workbook.SaveAs(tempFile.Path);
         }
@@ -423,6 +424,8 @@ public class BranchLitresExcelParserTests
         Assert.Equal("TAUPO", entry.BranchId.Value);
         Assert.Equal(new DateOnly(2026, 4, 1), entry.Date);
         Assert.Equal(52.25m, entry.Litres.Value);
+        Assert.NotNull(entry.Rego);
+        Assert.Equal("NBM929", entry.Rego.NormalisedValue);
         Assert.Equal("Taupo", entry.SourceReference.SheetName);
         Assert.Equal(2, entry.SourceReference.RowNumber);
     }
@@ -451,6 +454,8 @@ public class BranchLitresExcelParserTests
         Assert.Equal("KERIKERI", entry.BranchId.Value);
         Assert.Equal(new DateOnly(2026, 4, 1), entry.Date);
         Assert.Equal(47.78m, entry.Litres.Value);
+        Assert.NotNull(entry.RentalAgreementNumber);
+        Assert.Equal("570226495", entry.RentalAgreementNumber.NormalisedValue);
         Assert.Equal("Kerikeri", entry.SourceReference.SheetName);
         Assert.Equal(1, entry.SourceReference.RowNumber);
     }

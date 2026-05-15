@@ -67,6 +67,94 @@ public class DeterministicReconciliationEngineTests
     }
 
     [Fact]
+    public void Reconcile_can_match_by_branch_date_litres_when_branch_has_no_ra_or_rego_and_cars_row_unique()
+    {
+        var branch = new BranchLitresEntry(
+            Guid.Parse("10000000-0000-0000-0000-000000000019"),
+            Period,
+            new CanonicalBranchId("TAUPO"),
+            new DateOnly(2026, 4, 10),
+            new Litres(33m),
+            new SourceReference("branch.xlsx", sheetName: "Taupo", rowNumber: 5));
+
+        var cars = CarsEntry(
+            "20000000-0000-0000-0000-000000000019",
+            ra: "KEEP-BILLING-ID",
+            litres: 33.45m,
+            date: new DateOnly(2026, 4, 11));
+
+        var result = Reconcile(branches: [branch], cars: [cars]);
+
+        var item = Assert.Single(result.Items);
+        Assert.Equal(ReconciliationStatus.Matched, item.SystemStatus);
+        Assert.Equal(cars.Id, item.CarsBillingEntryId);
+        Assert.Contains("FallbackBranchDateLitres", item.ReasonCodes);
+        Assert.Equal(ConfidenceBucket.Low, item.ConfidenceBucket);
+    }
+
+    [Fact]
+    public void Reconcile_branch_date_litres_fallback_marks_duplicate_possible_when_multiple_cars_rows_align()
+    {
+        var branch = new BranchLitresEntry(
+            Guid.Parse("10000000-0000-0000-0000-000000000020"),
+            Period,
+            new CanonicalBranchId("TAUPO"),
+            new DateOnly(2026, 4, 1),
+            new Litres(15m),
+            new SourceReference("branch.xlsx", sheetName: "Taupo", rowNumber: 6));
+
+        var firstCars = CarsEntry("20000000-0000-0000-0000-000000000020", ra: "CARS-A", litres: 15m);
+        var secondCars = CarsEntry("20000000-0000-0000-0000-000000000021", ra: "CARS-B", litres: 15m);
+
+        var result = Reconcile(branches: [branch], cars: [firstCars, secondCars]);
+
+        var item = Assert.Single(result.Items);
+        Assert.Equal(ReconciliationStatus.DuplicatePossible, item.SystemStatus);
+        Assert.Contains("FallbackBranchDateLitres", item.ReasonCodes);
+        Assert.Equal(2, item.MatchCandidates.Count(candidate => candidate.CandidateType == MatchCandidateType.CarsBillingEntry));
+    }
+
+    [Fact]
+    public void Reconcile_branch_date_litres_fallback_skips_cars_rows_already_linked_to_earlier_branch_entries()
+    {
+        var sharedDate = new DateOnly(2026, 4, 8);
+        var firstBranch = new BranchLitresEntry(
+            Guid.Parse("10000000-0000-0000-0000-000000000060"),
+            Period,
+            new CanonicalBranchId("TAUPO"),
+            sharedDate,
+            new Litres(22m),
+            new SourceReference("branch.xlsx", sheetName: "Taupo", rowNumber: 2));
+
+        var secondBranch = new BranchLitresEntry(
+            Guid.Parse("10000000-0000-0000-0000-000000000061"),
+            Period,
+            new CanonicalBranchId("TAUPO"),
+            sharedDate,
+            new Litres(88m),
+            new SourceReference("branch.xlsx", sheetName: "Taupo", rowNumber: 3));
+
+        var carsRow = CarsEntry(
+            "20000000-0000-0000-0000-000000000060",
+            ra: "ONLY-BILLING",
+            litres: 22.1m,
+            date: sharedDate);
+
+        var result = Reconcile(branches: [firstBranch, secondBranch], cars: [carsRow]);
+
+        Assert.Equal(2, result.Items.Count);
+        var matched = Assert.Single(result.Items, item => item.SystemStatus == ReconciliationStatus.Matched);
+        var unbilled = Assert.Single(result.Items, item => item.SystemStatus == ReconciliationStatus.Unbilled);
+
+        Assert.Equal(firstBranch.Id, matched.BranchLitresEntryId);
+        Assert.Equal(carsRow.Id, matched.CarsBillingEntryId);
+        Assert.Contains("FallbackBranchDateLitres", matched.ReasonCodes);
+
+        Assert.Equal(secondBranch.Id, unbilled.BranchLitresEntryId);
+        Assert.Null(unbilled.CarsBillingEntryId);
+    }
+
+    [Fact]
     public void Reconcile_marks_duplicate_candidates_as_duplicate_possible()
     {
         var branch = BranchEntry("10000000-0000-0000-0000-000000000004", ra: "RA-DUP", litres: 10m);

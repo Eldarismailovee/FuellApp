@@ -46,7 +46,8 @@ public sealed class DeterministicReconciliationEngine : IReconciliationEngine
         foreach (var branchEntry in branches)
         {
             var supplierCandidates = FindSupplierCandidates(branchEntry, supplierByBranch, rules);
-            var match = FindCarsMatch(branchEntry, cars, rules);
+            var unmatchedCars = cars.Where(entry => !matchedCarsIds.Contains(entry.Id)).ToArray();
+            var match = FindCarsMatch(branchEntry, unmatchedCars, rules);
 
             if (match.Status != ReconciliationStatus.Unbilled)
             {
@@ -136,6 +137,35 @@ public sealed class DeterministicReconciliationEngine : IReconciliationEngine
         if (fallbackCandidates.Length == 1)
         {
             return CreateMatchedOrVarianceResult(branchEntry, fallbackCandidates[0], rules, ConfidenceBucket.Medium, ["FallbackRegoDateLitres"]);
+        }
+
+        var tertiaryCandidates = cars
+            .Where(carsEntry => carsEntry.BranchId?.Value == branchEntry.BranchId.Value)
+            .Where(carsEntry => carsEntry.Date is not null && Math.Abs(carsEntry.Date.Value.DayNumber - branchEntry.Date.DayNumber) <= rules.DateToleranceDays)
+            .Where(carsEntry => carsEntry.BilledLitres is not null && Math.Abs(carsEntry.BilledLitres.Value.Value - branchEntry.Litres.Value) <= rules.LitresTolerance)
+            .OrderBy(carsEntry => Math.Abs(carsEntry.Date!.Value.DayNumber - branchEntry.Date.DayNumber))
+            .ThenBy(carsEntry => Math.Abs(carsEntry.BilledLitres!.Value.Value - branchEntry.Litres.Value))
+            .ThenBy(carsEntry => carsEntry.Id)
+            .ToArray();
+
+        if (tertiaryCandidates.Length > 1)
+        {
+            return new CarsMatchResult(
+                ReconciliationStatus.DuplicatePossible,
+                ConfidenceBucket.Low,
+                ["DuplicatePossible", "MultipleCarsCandidates", "FallbackBranchDateLitres"],
+                tertiaryCandidates,
+                "Multiple Cars+ candidates matched branch/date/litres.");
+        }
+
+        if (tertiaryCandidates.Length == 1)
+        {
+            return CreateMatchedOrVarianceResult(
+                branchEntry,
+                tertiaryCandidates[0],
+                rules,
+                ConfidenceBucket.Low,
+                ["FallbackBranchDateLitres"]);
         }
 
         return new CarsMatchResult(

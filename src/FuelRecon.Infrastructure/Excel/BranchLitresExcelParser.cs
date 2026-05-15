@@ -466,6 +466,8 @@ public sealed class BranchLitresExcelParser(IExcelWorkbookReader workbookReader)
         var rawRego = row.GetCellRawText(columns.RegoColumnIndex);
         var rego = NormaliseRego(rawRego, sourceReference, rowIssues);
 
+        MergeWeakSheetIdentifierInference(row, columns, ref rentalAgreementNumber, ref rego);
+
         var noteOrReference = TrimToNull(row.GetCellRawText(columns.NoteColumnIndex));
 
         var date = ResolveDate(row, period, columns, sourceReference, rowIssues);
@@ -584,6 +586,190 @@ public sealed class BranchLitresExcelParser(IExcelWorkbookReader workbookReader)
         return trimmed.All(char.IsDigit) && trimmed.Length is >= 3 and <= 4;
     }
 
+    /// <summary>
+    /// Weak branch-litre layouts (headerless Taupo/Kerikeri/Whangarei grids) omit RA/rego column indices.
+    /// Scan remaining cells left-to-right for plate-like regos or numeric-heavy rental agreements.
+    /// </summary>
+    private static void MergeWeakSheetIdentifierInference(
+        ExcelRowModel row,
+        BranchLitresColumns columns,
+        ref RentalAgreementNumber? rentalAgreementNumber,
+        ref Rego? rego)
+    {
+        if (!columns.IsWeakIdentifierLayout())
+        {
+            return;
+        }
+
+        if (TryInferWeakIdentifiers(row, columns, out var inferredRa, out var inferredRego))
+        {
+            rentalAgreementNumber ??= inferredRa;
+            rego ??= inferredRego;
+        }
+    }
+
+    private static bool TryInferWeakIdentifiers(
+        ExcelRowModel row,
+        BranchLitresColumns columns,
+        out RentalAgreementNumber? rentalAgreement,
+        out Rego? rego)
+    {
+        rentalAgreement = null;
+        rego = null;
+
+        for (var columnIndex = 0; columnIndex < row.Cells.Count; columnIndex++)
+        {
+            if (columnIndex == columns.LitresColumnIndex || columnIndex == columns.DateColumnIndex)
+            {
+                continue;
+            }
+
+            if (columns.BranchColumnIndex is { } branchColumn && columnIndex == branchColumn)
+            {
+                continue;
+            }
+
+            if (columns.NoteColumnIndex is { } noteColumn && columnIndex == noteColumn)
+            {
+                continue;
+            }
+
+            var raw = TrimmedPresentText(row.Cells[columnIndex].RawText);
+            if (raw is null)
+            {
+                continue;
+            }
+
+            ClassifyWeakIdentifierCell(raw, ref rentalAgreement, ref rego);
+
+            if (rentalAgreement is not null && rego is not null)
+            {
+                break;
+            }
+        }
+
+        return rentalAgreement is not null || rego is not null;
+    }
+
+    /// <summary>
+    /// Disambiguate plate-like tokens from RA-like tokens without relying on sheet headers.
+    /// </summary>
+    private static void ClassifyWeakIdentifierCell(string raw, ref RentalAgreementNumber? rentalAgreement, ref Rego? rego)
+    {
+        var trimmed = TrimExcelNumericSuffix(raw.Trim());
+        if (trimmed.Length == 0)
+        {
+            return;
+        }
+
+        if (rentalAgreement is null && trimmed.All(char.IsDigit) && trimmed.Length >= 5)
+        {
+            if (TryInferRentalAgreementFromWeakCell(raw, out var agreement))
+            {
+                rentalAgreement = agreement;
+            }
+
+            return;
+        }
+
+        if (rentalAgreement is null
+            && trimmed.StartsWith("RA", StringComparison.OrdinalIgnoreCase)
+            && trimmed.Length >= 4)
+        {
+            if (TryInferRentalAgreementFromWeakCell(raw, out var agreement))
+            {
+                rentalAgreement = agreement;
+            }
+
+            return;
+        }
+
+        if (rego is null && TryInferRegoFromWeakCell(raw, out var plate))
+        {
+            rego = plate;
+            return;
+        }
+
+        if (rentalAgreement is null && trimmed.Length > 8 && TryInferRentalAgreementFromWeakCell(raw, out var longAgreement))
+        {
+            rentalAgreement = longAgreement;
+        }
+    }
+
+    private static string TrimExcelNumericSuffix(string value)
+    {
+        if (value.EndsWith(".0", StringComparison.Ordinal))
+        {
+            return value[..^2];
+        }
+
+        return value;
+    }
+
+    /// <summary>
+    /// Numeric-heavy tokens (common agreement numbers) and explicit RA-prefixed values map to rental agreements.
+    /// </summary>
+    private static bool TryInferRentalAgreementFromWeakCell(string raw, out RentalAgreementNumber? rentalAgreement)
+    {
+        rentalAgreement = null;
+
+        var normalisedResult = RentalAgreementNormaliser.Normalise(raw);
+        if (!normalisedResult.Success || normalisedResult.NormalisedValue is null)
+        {
+            return false;
+        }
+
+        var norm = normalisedResult.NormalisedValue;
+        var digitsOnly = norm.All(char.IsDigit);
+        if (digitsOnly && norm.Length < 5)
+        {
+            return false;
+        }
+
+        try
+        {
+            rentalAgreement = new RentalAgreementNumber(raw);
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryInferRegoFromWeakCell(string raw, out Rego? rego)
+    {
+        rego = null;
+
+        var normalisedResult = RegoNormaliser.Normalise(raw);
+        if (!normalisedResult.Success || normalisedResult.NormalisedValue is null)
+        {
+            return false;
+        }
+
+        var norm = normalisedResult.NormalisedValue;
+
+        if (norm.All(char.IsDigit))
+        {
+            return false;
+        }
+
+        if (norm.Length is < 4 or > 8)
+        {
+            return false;
+        }
+
+        try
+        {
+            rego = new Rego(raw);
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
+
     private static RentalAgreementNumber? NormaliseRentalAgreement(
         string? rawValue,
         SourceReference sourceReference,
@@ -680,6 +866,12 @@ internal sealed record BranchLitresColumns(
 {
     public bool HasMinimumRequiredColumns =>
         LitresColumnIndex is not null;
+
+    /// <summary>
+    /// True when the sheet mapping provides no dedicated RA/rego columns (weak fallback grids).
+    /// </summary>
+    public bool IsWeakIdentifierLayout() =>
+        RentalAgreementColumnIndex is null && RegoColumnIndex is null;
 
     public static BranchLitresColumns From(IReadOnlyList<string> headers) =>
         new(
