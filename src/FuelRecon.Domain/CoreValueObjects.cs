@@ -148,6 +148,12 @@ public sealed record RentalAgreementNumber
             throw new ArgumentException("Rental agreement number cannot be empty.", nameof(rawValue));
         }
 
+        var compact = new string(rawValue.Where(char.IsLetterOrDigit).ToArray());
+        if (compact.Length == 0)
+        {
+            throw new ArgumentException("Rental agreement number must contain at least one non-formatting character.", nameof(rawValue));
+        }
+
         RawValue = rawValue;
         NormalisedValue = Normalise(rawValue);
 

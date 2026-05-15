@@ -35,52 +35,52 @@ public sealed class BranchLitresExcelParser(IExcelWorkbookReader workbookReader)
         var issues = new List<BranchLitresParseIssue>();
         var rowCount = 0;
 
-foreach (var sheet in workbookResult.Workbook.Sheets.Where(sheet => !ExcelSheetFilter.IsNonDataSheet(sheet.SheetName)))
-{
-    var columns = BranchLitresColumns.From(sheet.Headers);
-
-    if (ShouldAttemptWeakBranchLitresFallback(sheet, columns)
-        && TryReadWeakBranchLitresSheet(filePath, sheet.SheetName, out var weakColumns, out var weakRows))
-    {
-        foreach (var row in weakRows)
+        foreach (var sheet in workbookResult.Workbook.Sheets.Where(sheet => !ExcelSheetFilter.IsNonDataSheet(sheet.SheetName)))
         {
-            if (ShouldSilentlySkipBranchLitresRow(row, weakColumns))
+            var columns = BranchLitresColumns.FromSheet(sheet.Headers, sheet.SheetName);
+
+            if (ShouldAttemptWeakBranchLitresFallback(sheet, columns)
+                && TryReadWeakBranchLitresSheet(filePath, sheet.SheetName, out var weakColumns, out var weakRows))
             {
+                foreach (var row in weakRows)
+                {
+                    if (ShouldSilentlySkipBranchLitresRow(row, weakColumns))
+                    {
+                        continue;
+                    }
+
+                    rowCount++;
+                    ParseRow(row, period, branchAliasResolver, weakColumns, entries, issues);
+                }
+
                 continue;
             }
 
-            rowCount++;
-            ParseRow(row, period, branchAliasResolver, weakColumns, entries, issues);
-        }
-
-        continue;
-    }
-
-    if (columns.HasMinimumRequiredColumns && sheet.Rows.Count > 0)
-    {
-        foreach (var row in sheet.Rows)
-        {
-            if (ShouldSilentlySkipBranchLitresRow(row, columns))
+            if (columns.HasMinimumRequiredColumns && sheet.Rows.Count > 0)
             {
+                foreach (var row in sheet.Rows)
+                {
+                    if (ShouldSilentlySkipBranchLitresRow(row, columns))
+                    {
+                        continue;
+                    }
+
+                    rowCount++;
+                    ParseRow(row, period, branchAliasResolver, columns, entries, issues);
+                }
+
                 continue;
             }
 
-            rowCount++;
-            ParseRow(row, period, branchAliasResolver, columns, entries, issues);
+            if (!columns.HasMinimumRequiredColumns || sheet.Rows.Count == 0)
+            {
+                issues.Add(new BranchLitresParseIssue(
+                    ValidationSeverity.Error,
+                    MissingRequiredColumnsReasonCode,
+                    "Branch litres sheet is missing required columns.",
+                    new SourceReference(sheet.SourceFile, sheet.SheetName, sheet.HeaderRowNumber == 0 ? null : sheet.HeaderRowNumber)));
+            }
         }
-
-        continue;
-    }
-
-    if (!columns.HasMinimumRequiredColumns || sheet.Rows.Count == 0)
-    {
-        issues.Add(new BranchLitresParseIssue(
-            ValidationSeverity.Error,
-            MissingRequiredColumnsReasonCode,
-            "Branch litres sheet is missing required columns.",
-            new SourceReference(sheet.SourceFile, sheet.SheetName, sheet.HeaderRowNumber == 0 ? null : sheet.HeaderRowNumber)));
-    }
-}
 
         return BranchLitresParseResult.From(
             entries,
@@ -91,7 +91,21 @@ foreach (var sheet in workbookResult.Workbook.Sheets.Where(sheet => !ExcelSheetF
 
     private static bool ShouldAttemptWeakBranchLitresFallback(ExcelSheetModel sheet, BranchLitresColumns columns) =>
         IsKnownWeakFallbackBranchSheetName(sheet.SheetName)
-        && (!columns.HasMinimumRequiredColumns || sheet.Rows.Count == 0);
+        && (
+            !columns.HasMinimumRequiredColumns
+            || sheet.Rows.Count == 0
+            || IsLikelyRealWeakBranchLitresSheet(sheet)
+        );
+
+    private static bool IsLikelyRealWeakBranchLitresSheet(ExcelSheetModel sheet)
+    {
+        if (!IsKnownWeakFallbackBranchSheetName(sheet.SheetName))
+        {
+            return false;
+        }
+
+        return sheet.Rows.Count > 25;
+    }
 
     private static bool IsKnownWeakFallbackBranchSheetName(string sheetName)
     {
@@ -101,10 +115,6 @@ foreach (var sheet in workbookResult.Workbook.Sheets.Where(sheet => !ExcelSheetF
             || trimmed.Equals("Whangarei", StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>
-    /// Re-opens the workbook when <see cref="ClosedXmlExcelWorkbookReader"/> could not detect a branch-litres header row,
-    /// using conservative sheet/name-specific column heuristics for real client layouts.
-    /// </summary>
     private static bool TryReadWeakBranchLitresSheet(
         string filePath,
         string sheetName,
@@ -214,7 +224,7 @@ foreach (var sheet in workbookResult.Workbook.Sheets.Where(sheet => !ExcelSheetF
         out BranchLitresColumns columns,
         out IReadOnlyList<ExcelRowModel> rows)
     {
-        columns = new BranchLitresColumns(null, null, null, null, null, null);
+        columns = BranchLitresColumns.FromSheet([], sheetName);
         rows = [];
 
         var colCount = lastCol - firstCol + 1;
@@ -223,58 +233,9 @@ foreach (var sheet in workbookResult.Workbook.Sheets.Where(sheet => !ExcelSheetF
             return false;
         }
 
-        var scanEnd = Math.Min(lastRow, firstRow + ExcelHeaderRowDetector.MaxRowsToScan - 1);
-        int? headerRowNumber = null;
-        for (var r = firstRow; r <= scanEnd; r++)
-        {
-            var texts = ReadWeakRowTexts(worksheet, r, firstCol, lastCol);
-            var mapped = BranchLitresColumns.From(texts);
-            if (mapped.LitresColumnIndex is not null)
-            {
-                headerRowNumber = r;
-                break;
-            }
-        }
+        columns = ClampKnownBranchSheetColumns(columns, colCount);
 
-        if (headerRowNumber is null)
-        {
-            return false;
-        }
-
-        var headerTexts = ReadWeakRowTexts(worksheet, headerRowNumber.Value, firstCol, lastCol);
-        columns = BranchLitresColumns.From(headerTexts);
-
-        if (columns.LitresColumnIndex is null && colCount > 4)
-        {
-            columns = columns with { LitresColumnIndex = Math.Min(4, colCount - 1) };
-        }
-
-        if (columns.LitresColumnIndex is null)
-        {
-            return false;
-        }
-
-        if (columns.DateColumnIndex is null && headerRowNumber.Value < lastRow)
-        {
-            var firstDataTexts = ReadWeakRowTexts(worksheet, headerRowNumber.Value + 1, firstCol, lastCol);
-            var dateIx = FindFirstDateColumnIndex(firstDataTexts);
-            if (dateIx is not null)
-            {
-                columns = columns with { DateColumnIndex = dateIx };
-            }
-        }
-
-        var headerLabels = headerTexts.Select(static h => string.IsNullOrWhiteSpace(h) ? string.Empty : h.Trim()).ToArray();
-        var built = BuildWeakBranchLitresRowsAfterHeader(
-            sourceFile,
-            sheetName,
-            worksheet,
-            headerRowNumber.Value,
-            lastRow,
-            firstCol,
-            lastCol,
-            headerLabels);
-
+        var built = BuildWeakDataRowsWithoutHeaderRow(sourceFile, sheetName, worksheet, firstRow, lastRow, firstCol, colCount);
         if (built.Count == 0)
         {
             return false;
@@ -295,63 +256,16 @@ foreach (var sheet in workbookResult.Workbook.Sheets.Where(sheet => !ExcelSheetF
         out BranchLitresColumns columns,
         out IReadOnlyList<ExcelRowModel> rows)
     {
-        columns = new BranchLitresColumns(null, null, null, null, null, null);
+        columns = BranchLitresColumns.FromSheet([], sheetName);
         rows = [];
 
         var colCount = lastCol - firstCol + 1;
-        if (colCount < 3 || lastRow < firstRow)
+        if (colCount < 1 || lastRow < firstRow)
         {
             return false;
         }
 
-        var probeEnd = Math.Min(lastRow, firstRow + 25);
-        var litresColumnIndex = Math.Min(3, colCount - 1);
-        var foundLitres = false;
-
-        for (var r = firstRow; r <= probeEnd; r++)
-        {
-            var texts = ReadWeakRowTexts(worksheet, r, firstCol, lastCol);
-            if (!texts.Any(static t => !string.IsNullOrWhiteSpace(t)))
-            {
-                continue;
-            }
-
-            if (TryPickKerikeriLitresColumn(texts, colCount, out litresColumnIndex))
-            {
-                foundLitres = true;
-                break;
-            }
-        }
-
-        if (!foundLitres)
-        {
-            litresColumnIndex = colCount > 4 ? Math.Min(3, colCount - 1) : Math.Min(2, colCount - 1);
-        }
-
-        int? dateColumnIndex = null;
-        int? raColumnIndex = null;
-        for (var r = firstRow; r <= probeEnd; r++)
-        {
-            var texts = ReadWeakRowTexts(worksheet, r, firstCol, lastCol);
-            if (!texts.Any(static t => !string.IsNullOrWhiteSpace(t)))
-            {
-                continue;
-            }
-
-            dateColumnIndex = FindFirstDateColumnIndex(texts);
-            if (colCount > 0 && !string.IsNullOrWhiteSpace(texts[0]))
-            {
-                var raProbe = RentalAgreementNormaliser.Normalise(texts[0].Trim());
-                if (raProbe.Success)
-                {
-                    raColumnIndex = 0;
-                }
-            }
-
-            break;
-        }
-
-        columns = new BranchLitresColumns(null, dateColumnIndex, litresColumnIndex, raColumnIndex, null, null);
+        columns = ClampKnownBranchSheetColumns(columns, colCount);
 
         var built = BuildWeakDataRowsWithoutHeaderRow(sourceFile, sheetName, worksheet, firstRow, lastRow, firstCol, colCount);
         if (built.Count == 0)
@@ -374,33 +288,16 @@ foreach (var sheet in workbookResult.Workbook.Sheets.Where(sheet => !ExcelSheetF
         out BranchLitresColumns columns,
         out IReadOnlyList<ExcelRowModel> rows)
     {
-        columns = new BranchLitresColumns(null, null, null, null, null, null);
+        columns = BranchLitresColumns.FromSheet([], sheetName);
         rows = [];
 
         var colCount = lastCol - firstCol + 1;
-        if (colCount < 2 || lastRow < firstRow)
+        if (colCount < 1 || lastRow < firstRow)
         {
             return false;
         }
 
-        var probeEnd = Math.Min(lastRow, firstRow + 25);
-        int? dateColumnIndex = null;
-        var litresColumnIndex = Math.Min(5, colCount - 1);
-
-        for (var r = firstRow; r <= probeEnd; r++)
-        {
-            var texts = ReadWeakRowTexts(worksheet, r, firstCol, lastCol);
-            if (!texts.Any(static t => !string.IsNullOrWhiteSpace(t)))
-            {
-                continue;
-            }
-
-            dateColumnIndex = FindFirstDateColumnIndex(texts);
-            TryPickWhangareiLitresColumn(texts, dateColumnIndex, colCount, out litresColumnIndex);
-            break;
-        }
-
-        columns = new BranchLitresColumns(null, dateColumnIndex, litresColumnIndex, null, null, null);
+        columns = ClampKnownBranchSheetColumns(columns, colCount);
 
         var built = BuildWeakDataRowsWithoutHeaderRow(sourceFile, sheetName, worksheet, firstRow, lastRow, firstCol, colCount);
         if (built.Count == 0)
@@ -412,92 +309,19 @@ foreach (var sheet in workbookResult.Workbook.Sheets.Where(sheet => !ExcelSheetF
         return true;
     }
 
-    private static bool TryPickKerikeriLitresColumn(string[] texts, int colCount, out int litresColumnIndex)
+    private static BranchLitresColumns ClampKnownBranchSheetColumns(BranchLitresColumns columns, int colCount)
     {
-        litresColumnIndex = Math.Min(3, colCount - 1);
-        if (colCount > 3 && TryLitresNormalisePlausible(texts[3], out _))
+        if (colCount <= 0)
         {
-            litresColumnIndex = 3;
-            return true;
+            return columns;
         }
 
-        if (colCount > 2 && TryLitresNormalisePlausible(texts[2], out _))
+        return columns with
         {
-            litresColumnIndex = 2;
-            return true;
-        }
-
-        return false;
-    }
-
-    private static void TryPickWhangareiLitresColumn(
-        string[] texts,
-        int? dateColumnIndex,
-        int colCount,
-        out int litresColumnIndex)
-    {
-        litresColumnIndex = Math.Min(5, colCount - 1);
-        var preferred = new[] { 5, 4, 3, 2, 1, 0 };
-        foreach (var ix in preferred)
-        {
-            if (ix >= colCount)
-            {
-                continue;
-            }
-
-            if (dateColumnIndex is not null && ix == dateColumnIndex.Value)
-            {
-                continue;
-            }
-
-            if (!TryLitresNormalisePlausible(texts[ix], out var litres))
-            {
-                continue;
-            }
-
-            if (litres is > 0 and <= 50_000m)
-            {
-                litresColumnIndex = ix;
-                return;
-            }
-        }
-    }
-
-    private static List<ExcelRowModel> BuildWeakBranchLitresRowsAfterHeader(
-        string sourceFile,
-        string sheetName,
-        IXLWorksheet worksheet,
-        int headerRowNumber,
-        int lastRowNumber,
-        int firstColumnNumber,
-        int lastColumnNumber,
-        IReadOnlyList<string> headers)
-    {
-        var columnCount = headers.Count;
-        var rows = new List<ExcelRowModel>();
-        for (var rowNumber = headerRowNumber + 1; rowNumber <= lastRowNumber; rowNumber++)
-        {
-            var cells = new ExcelCellModel[columnCount];
-            for (var offset = 0; offset < columnCount; offset++)
-            {
-                var columnNumber = firstColumnNumber + offset;
-                var headerLabel = string.IsNullOrWhiteSpace(headers[offset]) ? null : headers[offset].Trim();
-                cells[offset] = new ExcelCellModel(
-                    sourceFile,
-                    sheetName,
-                    rowNumber,
-                    columnNumber,
-                    headerLabel,
-                    ReadWeakCellText(worksheet.Cell(rowNumber, columnNumber)));
-            }
-
-            if (cells.Any(static cell => !string.IsNullOrWhiteSpace(cell.RawText)))
-            {
-                rows.Add(new ExcelRowModel(sourceFile, sheetName, rowNumber, cells));
-            }
-        }
-
-        return rows;
+            DateColumnIndex = columns.DateColumnIndex is null ? null : Math.Min(columns.DateColumnIndex.Value, colCount - 1),
+            LitresColumnIndex = columns.LitresColumnIndex is null ? null : Math.Min(columns.LitresColumnIndex.Value, colCount - 1),
+            RegoColumnIndex = columns.RegoColumnIndex is null ? null : Math.Min(columns.RegoColumnIndex.Value, colCount - 1)
+        };
     }
 
     private static List<ExcelRowModel> BuildWeakDataRowsWithoutHeaderRow(
@@ -534,63 +358,8 @@ foreach (var sheet in workbookResult.Workbook.Sheets.Where(sheet => !ExcelSheetF
         return rows;
     }
 
-    private static string[] ReadWeakRowTexts(IXLWorksheet worksheet, int rowNumber, int firstCol, int lastCol)
-    {
-        var count = lastCol - firstCol + 1;
-        var texts = new string[count];
-        for (var i = 0; i < count; i++)
-        {
-            texts[i] = ReadWeakCellText(worksheet.Cell(rowNumber, firstCol + i));
-        }
-
-        return texts;
-    }
-
     private static string ReadWeakCellText(IXLCell cell) => cell.CachedValue.ToString();
 
-    private static int? FindFirstDateColumnIndex(IReadOnlyList<string> cellTexts)
-    {
-        for (var i = 0; i < cellTexts.Count; i++)
-        {
-            var raw = cellTexts[i]?.Trim();
-            if (string.IsNullOrWhiteSpace(raw))
-            {
-                continue;
-            }
-
-            var result = DateNormaliser.NormaliseText(raw);
-            if (result.Success && result.NormalisedValue is not null)
-            {
-                return i;
-            }
-        }
-
-        return null;
-    }
-
-    private static bool TryLitresNormalisePlausible(string? raw, out decimal litres)
-    {
-        litres = 0m;
-        var result = LitresNormaliser.Normalise(raw);
-        if (!result.Success || result.NormalisedValue is null)
-        {
-            return false;
-        }
-
-        var value = result.NormalisedValue.Value.Value;
-        if (value is <= 0 or > 100_000m)
-        {
-            return false;
-        }
-
-        litres = value;
-        return true;
-    }
-
-    /// <summary>
-    /// Rows that are effectively blank for transactional purposes are ignored without emitting validation noise
-    /// (e.g. trailing empty rows or branch-only placeholders).
-    /// </summary>
     private static bool ShouldSilentlySkipBranchLitresRow(ExcelRowModel row, BranchLitresColumns columns)
     {
         if (columns.LitresColumnIndex is null)
@@ -604,15 +373,12 @@ foreach (var sheet in workbookResult.Workbook.Sheets.Where(sheet => !ExcelSheetF
         var regoText = TrimmedPresentText(row.GetCellRawText(columns.RegoColumnIndex));
         var noteText = TrimmedPresentText(row.GetCellRawText(columns.NoteColumnIndex));
 
-        var hasTransactionalContent =
-            dateText is not null
-            || raText is not null
-            || regoText is not null
-            || noteText is not null;
-
-        if (litresText is null && !hasTransactionalContent)
+        if (litresText is null)
         {
-            return true;
+            return dateText is null
+                && raText is null
+                && regoText is null
+                && noteText is null;
         }
 
         return false;
@@ -718,31 +484,15 @@ foreach (var sheet in workbookResult.Workbook.Sheets.Where(sheet => !ExcelSheetF
             {
                 return dateResult.NormalisedValue.Value;
             }
-
-            rowIssues.Add(new BranchLitresParseIssue(
-                ValidationSeverity.Error,
-                dateResult.ReasonCode ?? DateNormaliser.InvalidDateFormatReasonCode,
-                $"Date value '{rawDate}' could not be normalised.",
-                sourceReference));
-            return null;
-        }
-
-        if (rentalAgreementNumber is not null || rego is not null || !string.IsNullOrWhiteSpace(noteOrReference))
-        {
-            rowIssues.Add(new BranchLitresParseIssue(
-                ValidationSeverity.Warning,
-                MissingDateDefaultedReasonCode,
-                "Date was missing; first day of the fuel period was used.",
-                sourceReference));
-            return new DateOnly(period.Year, period.Month, 1);
         }
 
         rowIssues.Add(new BranchLitresParseIssue(
-            ValidationSeverity.Error,
-            DateNormaliser.InvalidDateFormatReasonCode,
-            "Branch litres row requires a date or at least one identifier/reference.",
+            ValidationSeverity.Warning,
+            MissingDateDefaultedReasonCode,
+            "Date was missing; first day of the fuel period was used.",
             sourceReference));
-        return null;
+
+        return new DateOnly(period.Year, period.Month, 1);
     }
 
     private static RentalAgreementNumber? NormaliseRentalAgreement(
@@ -820,12 +570,13 @@ foreach (var sheet in workbookResult.Workbook.Sheets.Where(sheet => !ExcelSheetF
     private static string? TrimToNull(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
-    /// <summary>
-    /// When a branch column exists, its cell value is used (including empty, which fails resolution as before).
-    /// When it is absent, the worksheet name is used as the branch alias for each row.
-    /// </summary>
     private static string ResolveBranchAliasInput(ExcelRowModel row, BranchLitresColumns columns)
     {
+        if (IsKnownWeakFallbackBranchSheetName(row.SheetName))
+        {
+            return row.SheetName.Trim();
+        }
+
         if (columns.BranchColumnIndex is not null)
         {
             return TrimToNull(row.GetCellRawText(columns.BranchColumnIndex)) ?? string.Empty;
@@ -843,10 +594,6 @@ internal sealed record BranchLitresColumns(
     int? RegoColumnIndex,
     int? NoteColumnIndex)
 {
-    /// <summary>
-    /// Litres column is required. Branch/location columns are optional (sheet name is the alias when absent).
-    /// Date, RA, rego, and note columns are optional in the header row; individual rows must still supply a parseable date or at least one identifier/reference where applicable.
-    /// </summary>
     public bool HasMinimumRequiredColumns =>
         LitresColumnIndex is not null;
 
@@ -858,6 +605,30 @@ internal sealed record BranchLitresColumns(
             ExcelColumnHeaderMatcher.FindFirstMatchingColumn(headers, ExcelParserKnownHeaders.BranchLitres.RentalAgreement),
             ExcelColumnHeaderMatcher.FindFirstMatchingColumn(headers, ExcelParserKnownHeaders.BranchLitres.Rego),
             ExcelColumnHeaderMatcher.FindFirstMatchingColumn(headers, ExcelParserKnownHeaders.BranchLitres.Note));
+
+    public static BranchLitresColumns FromSheet(IReadOnlyList<string> headers, string sheetName)
+    {
+        var columns = From(headers);
+
+        var normalisedSheetName = ExcelColumnHeaderMatcher.Normalise(sheetName);
+        var isKnownBranchSheet =
+            normalisedSheetName is "taupo"
+            or "kerikeri"
+            or "whangarei";
+
+        if (!isKnownBranchSheet)
+        {
+            return columns;
+        }
+
+        return columns with
+        {
+            DateColumnIndex = columns.DateColumnIndex ?? 6,
+            LitresColumnIndex = columns.LitresColumnIndex ?? 4,
+            RegoColumnIndex = columns.RegoColumnIndex ?? 0,
+            BranchColumnIndex = null
+        };
+    }
 }
 
 internal static class ExcelRowModelExtensions

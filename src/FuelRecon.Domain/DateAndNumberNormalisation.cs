@@ -135,9 +135,8 @@ public static class DateNormaliser
 
         try
         {
-            var baseDate = new DateTime(1899, 12, 30);
-            var dateTime = baseDate.AddDays((double)serialDate);
-            return DateNormalisationResult.Valid(rawValue, DateOnly.FromDateTime(dateTime));
+            var excelDateTime = DateTime.FromOADate((double)serialDate + 1);
+            return DateNormalisationResult.Valid(rawValue, DateOnly.FromDateTime(excelDateTime));
         }
         catch (ArgumentException)
         {
