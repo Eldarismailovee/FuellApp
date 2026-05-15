@@ -21,6 +21,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\FuelRecon.Domain\FuelRecon.Domain.csproj" />
     <ProjectReference Include="..\..\src\FuelRecon.Application\FuelRecon.Application.csproj" />
+    <ProjectReference Include="..\..\src\FuelRecon.Infrastructure\FuelRecon.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>
