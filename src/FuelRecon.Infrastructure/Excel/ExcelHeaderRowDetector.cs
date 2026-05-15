@@ -14,16 +14,23 @@ internal static class ExcelHeaderRowDetector
         int lastColumnNumber)
     {
         var scanEnd = Math.Min(lastRowNumber, firstRowNumber + MaxRowsToScan - 1);
+
+        int? bestRow = null;
+        var bestScore = int.MinValue;
+
         for (var rowNumber = firstRowNumber; rowNumber <= scanEnd; rowNumber++)
         {
             var texts = ReadRowCellTexts(worksheet, rowNumber, firstColumnNumber, lastColumnNumber);
-            if (IsBranchLitresHeaderRow(texts))
+            var score = ScoreBranchLitresRow(texts);
+
+            if (score > bestScore)
             {
-                return rowNumber;
+                bestScore = score;
+                bestRow = rowNumber;
             }
         }
 
-        return null;
+        return bestScore >= 30 ? bestRow : null;
     }
 
     internal static int? FindCarsBillingHeaderRow(
@@ -34,6 +41,7 @@ internal static class ExcelHeaderRowDetector
         int lastColumnNumber)
     {
         var scanEnd = Math.Min(lastRowNumber, firstRowNumber + MaxRowsToScan - 1);
+
         for (var rowNumber = firstRowNumber; rowNumber <= scanEnd; rowNumber++)
         {
             var texts = ReadRowCellTexts(worksheet, rowNumber, firstColumnNumber, lastColumnNumber);
@@ -46,17 +54,51 @@ internal static class ExcelHeaderRowDetector
         return null;
     }
 
-    private static bool IsBranchLitresHeaderRow(IReadOnlyList<string> cellTexts)
+    private static int ScoreBranchLitresRow(IReadOnlyList<string> cells)
     {
-        if (!RowMatchesAnyAlias(cellTexts, ExcelParserKnownHeaders.BranchLitres.Litres))
+        var score = 0;
+
+        foreach (var cell in cells)
         {
-            return false;
+            var value = ExcelColumnHeaderMatcher.Normalise(cell);
+
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                continue;
+            }
+
+            if (Matches(value, ExcelParserKnownHeaders.BranchLitres.Date))
+            {
+                score += 15;
+            }
+
+            if (Matches(value, ExcelParserKnownHeaders.BranchLitres.Litres))
+            {
+                score += 15;
+            }
+
+            if (Matches(value, ExcelParserKnownHeaders.BranchLitres.Rego))
+            {
+                score += 10;
+            }
+
+            if (Matches(value, ExcelParserKnownHeaders.BranchLitres.RentalAgreement))
+            {
+                score += 10;
+            }
+
+            if (value.Any(char.IsLetter))
+            {
+                score += 2;
+            }
+
+            if (decimal.TryParse(value, out _))
+            {
+                score -= 5;
+            }
         }
 
-        return RowMatchesAnyAlias(cellTexts, ExcelParserKnownHeaders.BranchLitres.Date)
-            || RowMatchesAnyAlias(cellTexts, ExcelParserKnownHeaders.BranchLitres.RentalAgreement)
-            || RowMatchesAnyAlias(cellTexts, ExcelParserKnownHeaders.BranchLitres.Rego)
-            || RowMatchesAnyAlias(cellTexts, ExcelParserKnownHeaders.BranchLitres.Note);
+        return score;
     }
 
     private static bool IsCarsBillingHeaderRow(IReadOnlyList<string> cellTexts)
@@ -73,20 +115,10 @@ internal static class ExcelHeaderRowDetector
 
     private static bool RowMatchesAnyAlias(IReadOnlyList<string> cellTexts, IReadOnlyCollection<string> aliases)
     {
-        var aliasKeys = aliases
-            .Select(ExcelColumnHeaderMatcher.Normalise)
-            .Where(static key => key.Length > 0)
-            .ToHashSet(StringComparer.Ordinal);
-
-        if (aliasKeys.Count == 0)
-        {
-            return false;
-        }
-
         foreach (var cellText in cellTexts)
         {
             var cellKey = ExcelColumnHeaderMatcher.Normalise(cellText);
-            if (cellKey.Length > 0 && aliasKeys.Contains(cellKey))
+            if (cellKey.Length > 0 && Matches(cellKey, aliases))
             {
                 return true;
             }
@@ -94,6 +126,11 @@ internal static class ExcelHeaderRowDetector
 
         return false;
     }
+
+    private static bool Matches(string normalisedValue, IReadOnlyCollection<string> aliases) =>
+        aliases
+            .Select(ExcelColumnHeaderMatcher.Normalise)
+            .Any(alias => alias == normalisedValue);
 
     private static string[] ReadRowCellTexts(
         IXLWorksheet worksheet,
@@ -103,6 +140,7 @@ internal static class ExcelHeaderRowDetector
     {
         var columnCount = lastColumnNumber - firstColumnNumber + 1;
         var texts = new string[columnCount];
+
         for (var offset = 0; offset < columnCount; offset++)
         {
             var columnNumber = firstColumnNumber + offset;

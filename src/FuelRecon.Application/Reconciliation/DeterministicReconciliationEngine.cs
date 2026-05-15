@@ -72,7 +72,7 @@ public sealed class DeterministicReconciliationEngine : IReconciliationEngine
             rules.RunCreatedAtUtc ?? DateTimeOffset.UnixEpoch,
             rules.CreatedBy,
             [new FileChecksum("DETERMINISTIC", DeterministicHash(input.Period.ToSortableString()))],
-            status: "Completed",
+            status: ReconciliationRunStatus.Completed,
             completedAtUtc: rules.RunCreatedAtUtc ?? DateTimeOffset.UnixEpoch,
             totalItemCount: items.Count,
             matchedItemCount: matchedCount,
@@ -195,14 +195,14 @@ public sealed class DeterministicReconciliationEngine : IReconciliationEngine
         var candidates = new List<MatchCandidate>();
         candidates.AddRange(supplierCandidates.Select(candidate => new MatchCandidate(
             DeterministicGuid("candidate", branchEntry.Id.ToString(), candidate.Id.ToString()),
-            MatchCandidateType.SupplierTransaction.ToString(),
+            MatchCandidateType.SupplierTransaction,
             candidate.Id,
             ConfidenceBucket.Medium,
             ["BranchId", "Date", "Litres"],
             sourceReference: candidate.SourceReference)));
         candidates.AddRange(match.CarsCandidates.Select(candidate => new MatchCandidate(
             DeterministicGuid("candidate", branchEntry.Id.ToString(), candidate.Id.ToString()),
-            MatchCandidateType.CarsBillingEntry.ToString(),
+            MatchCandidateType.CarsBillingEntry,
             candidate.Id,
             match.ConfidenceBucket,
             match.Status == ReconciliationStatus.Matched ? ["RA", "Rego", "Date", "Litres"] : [],
@@ -219,7 +219,7 @@ public sealed class DeterministicReconciliationEngine : IReconciliationEngine
             runId,
             period,
             match.Status,
-            match.Status == ReconciliationStatus.Matched ? ResolutionStatus.Resolved : ResolutionStatus.Open,
+            match.Status == ReconciliationStatus.Matched ? ResolutionStatus.Resolved : ResolutionStatus.Unresolved,
             supplierCandidates.Count > 1 ? ConfidenceBucket.Low : match.ConfidenceBucket,
             reasonCodes,
             branchEntry.BranchId,
@@ -241,7 +241,7 @@ public sealed class DeterministicReconciliationEngine : IReconciliationEngine
             runId,
             period,
             ReconciliationStatus.CarsOnly,
-            ResolutionStatus.Open,
+            ResolutionStatus.Unresolved,
             ConfidenceBucket.Medium,
             ["CarsOnly"],
             carsEntry.BranchId,
@@ -252,7 +252,7 @@ public sealed class DeterministicReconciliationEngine : IReconciliationEngine
             [
                 new MatchCandidate(
                     DeterministicGuid("candidate", carsEntry.Id.ToString()),
-                    MatchCandidateType.CarsBillingEntry.ToString(),
+                    MatchCandidateType.CarsBillingEntry,
                     carsEntry.Id,
                     ConfidenceBucket.Medium,
                     sourceReference: carsEntry.SourceReference)

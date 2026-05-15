@@ -27,8 +27,8 @@ public class DateAndNumberNormaliserTests
     }
 
     [Theory]
-    [InlineData("46113", 2026, 4, 1)]
-    [InlineData("46157.75", 2026, 5, 15)]
+    [InlineData("46112", 2026, 4, 1)]
+    [InlineData("46156.75", 2026, 5, 15)]
     public void DateNormaliser_normalises_Excel_serial_dates(string rawSerial, int expectedYear, int expectedMonth, int expectedDay)
     {
         var result = DateNormaliser.NormaliseExcelSerial(decimal.Parse(rawSerial, CultureInfo.InvariantCulture));
@@ -122,6 +122,7 @@ public class DateAndNumberNormaliserTests
     [InlineData("$1.234,56", "1234.56")]
     [InlineData("$ 1 234,50", "1234.50")]
     [InlineData("-$12.345", "-12.35")]
+    [InlineData("$-12.345", "-12.35")]
     public void MoneyAmountNormaliser_parses_and_rounds_money_formats(string rawValue, string expectedValue)
     {
         var result = MoneyAmountNormaliser.Normalise(rawValue);

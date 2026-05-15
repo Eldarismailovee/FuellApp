@@ -15,6 +15,10 @@ public sealed record BranchLitresParseResult(
     int ValidRowCount,
     int SkippedRowCount)
 {
+    public bool HasErrors => Issues.Any(issue => issue.Severity == ValidationSeverity.Error);
+
+    public bool HasWarnings => Issues.Any(issue => issue.Severity == ValidationSeverity.Warning);
+
     public static BranchLitresParseResult From(
         IReadOnlyList<BranchLitresEntry> entries,
         IReadOnlyList<BranchLitresParseIssue> issues,

@@ -21,7 +21,7 @@ public class ReconciliationResultModelsTests
             " arina ",
             checksums,
             settingsSnapshotId: " settings-v1 ",
-            status: " Completed ",
+            status: ReconciliationRunStatus.Completed,
             completedAtUtc: new DateTimeOffset(2026, 5, 1, 8, 35, 0, TimeSpan.Zero),
             totalItemCount: 10,
             matchedItemCount: 7,
@@ -34,7 +34,7 @@ public class ReconciliationResultModelsTests
         Assert.Equal("SHA256", run.InputFileChecksums[0].Algorithm);
         Assert.Equal("supplier-checksum", run.InputFileChecksums[0].Value);
         Assert.Equal("settings-v1", run.SettingsSnapshotId);
-        Assert.Equal("Completed", run.Status);
+        Assert.Equal(ReconciliationRunStatus.Completed, run.Status);
         Assert.True(run.IsCompleted);
         Assert.False(run.IsFailed);
         Assert.Equal(10, run.TotalItemCount);
@@ -58,7 +58,7 @@ public class ReconciliationResultModelsTests
         checksums[0] = new FileChecksum("sha256", "changed");
 
         Assert.Equal("original", run.InputFileChecksums[0].Value);
-        Assert.Equal("Created", run.Status);
+        Assert.Equal(ReconciliationRunStatus.Created, run.Status);
         Assert.Null(run.SettingsSnapshotId);
     }
 
@@ -69,7 +69,7 @@ public class ReconciliationResultModelsTests
 
         var candidate = new MatchCandidate(
             Guid.Parse("74a98d17-1352-4a69-b6d8-000000000003"),
-            " BranchLitresEntry ",
+            MatchCandidateType.BranchLitresEntry,
             Guid.Parse("74a98d17-1352-4a69-b6d8-000000000004"),
             ConfidenceBucket.High,
             matchedFields: [" BranchId ", "Date", ""],
@@ -77,7 +77,7 @@ public class ReconciliationResultModelsTests
             conflictingFields: [" Litres "],
             sourceReference: sourceReference);
 
-        Assert.Equal("BranchLitresEntry", candidate.CandidateType);
+        Assert.Equal(MatchCandidateType.BranchLitresEntry, candidate.CandidateType);
         Assert.Equal(ConfidenceBucket.High, candidate.ConfidenceBucket);
         Assert.Equal(["BranchId", "Date"], candidate.MatchedFields);
         Assert.Equal(["RA"], candidate.MissingFields);
@@ -90,13 +90,13 @@ public class ReconciliationResultModelsTests
     {
         var firstCandidate = new MatchCandidate(
             Guid.Parse("74a98d17-1352-4a69-b6d8-000000000005"),
-            "SupplierTransaction",
+            MatchCandidateType.SupplierTransaction,
             Guid.Parse("74a98d17-1352-4a69-b6d8-000000000006"),
             ConfidenceBucket.Medium);
 
         var secondCandidate = new MatchCandidate(
             Guid.Parse("74a98d17-1352-4a69-b6d8-000000000007"),
-            "CarsBillingEntry",
+            MatchCandidateType.CarsBillingEntry,
             Guid.Parse("74a98d17-1352-4a69-b6d8-000000000008"),
             ConfidenceBucket.Low);
 
@@ -122,7 +122,7 @@ public class ReconciliationResultModelsTests
         var carsReference = new SourceReference("cars.xlsx", sheetName: "Export", rowNumber: 100);
         var candidate = new MatchCandidate(
             Guid.Parse("74a98d17-1352-4a69-b6d8-000000000011"),
-            "CarsBillingEntry",
+            MatchCandidateType.CarsBillingEntry,
             Guid.Parse("74a98d17-1352-4a69-b6d8-000000000012"),
             ConfidenceBucket.Low);
 
@@ -172,7 +172,7 @@ public class ReconciliationResultModelsTests
             Guid.Parse("74a98d17-1352-4a69-b6d8-000000000018"),
             new FuelPeriod(2026, 5),
             ReconciliationStatus.SupplierOnly,
-            ResolutionStatus.Open,
+            ResolutionStatus.Unresolved,
             ConfidenceBucket.Unknown,
             ["SupplierOnly"]);
 
@@ -225,13 +225,13 @@ public class ReconciliationResultModelsTests
             new DateTimeOffset(2026, 5, 2, 9, 0, 0, TimeSpan.Zero),
             " arina ",
             " matched after review ",
-            oldResolutionStatus: ResolutionStatus.Open,
+            oldResolutionStatus: ResolutionStatus.Unresolved,
             newResolutionStatus: ResolutionStatus.Resolved);
 
         Assert.Equal(AuditActionType.Resolve, action.ActionType);
         Assert.Equal("arina", action.CreatedBy);
         Assert.Equal("matched after review", action.Note);
-        Assert.Equal(ResolutionStatus.Open, action.OldResolutionStatus);
+        Assert.Equal(ResolutionStatus.Unresolved, action.OldResolutionStatus);
         Assert.Equal(ResolutionStatus.Resolved, action.NewResolutionStatus);
     }
 
@@ -311,12 +311,6 @@ public class ReconciliationResultModelsTests
             DateTimeOffset.UnixEpoch,
             "arina",
             []));
-
-        Assert.Throws<ArgumentException>(() => new MatchCandidate(
-            Guid.NewGuid(),
-            " ",
-            Guid.NewGuid(),
-            ConfidenceBucket.Low));
 
         Assert.Throws<ArgumentException>(() => new ManualAction(
             Guid.NewGuid(),

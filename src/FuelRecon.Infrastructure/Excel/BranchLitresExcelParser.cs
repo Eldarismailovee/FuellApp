@@ -35,52 +35,52 @@ public sealed class BranchLitresExcelParser(IExcelWorkbookReader workbookReader)
         var issues = new List<BranchLitresParseIssue>();
         var rowCount = 0;
 
-        foreach (var sheet in workbookResult.Workbook.Sheets.Where(sheet => !ExcelSheetFilter.IsNonDataSheet(sheet.SheetName)))
+foreach (var sheet in workbookResult.Workbook.Sheets.Where(sheet => !ExcelSheetFilter.IsNonDataSheet(sheet.SheetName)))
+{
+    var columns = BranchLitresColumns.From(sheet.Headers);
+
+    if (ShouldAttemptWeakBranchLitresFallback(sheet, columns)
+        && TryReadWeakBranchLitresSheet(filePath, sheet.SheetName, out var weakColumns, out var weakRows))
+    {
+        foreach (var row in weakRows)
         {
-            var columns = BranchLitresColumns.From(sheet.Headers);
-
-            if (columns.HasMinimumRequiredColumns && sheet.Rows.Count > 0)
+            if (ShouldSilentlySkipBranchLitresRow(row, weakColumns))
             {
-                foreach (var row in sheet.Rows)
-                {
-                    if (ShouldSilentlySkipBranchLitresRow(row, columns))
-                    {
-                        continue;
-                    }
-
-                    rowCount++;
-                    ParseRow(row, period, branchAliasResolver, columns, entries, issues);
-                }
-
                 continue;
             }
 
-            if (ShouldAttemptWeakBranchLitresFallback(sheet, columns)
-                && TryReadWeakBranchLitresSheet(filePath, sheet.SheetName, out var weakColumns, out var weakRows))
-            {
-                foreach (var row in weakRows)
-                {
-                    if (ShouldSilentlySkipBranchLitresRow(row, weakColumns))
-                    {
-                        continue;
-                    }
-
-                    rowCount++;
-                    ParseRow(row, period, branchAliasResolver, weakColumns, entries, issues);
-                }
-
-                continue;
-            }
-
-            if (!columns.HasMinimumRequiredColumns || sheet.Rows.Count == 0)
-            {
-                issues.Add(new BranchLitresParseIssue(
-                    ValidationSeverity.Error,
-                    MissingRequiredColumnsReasonCode,
-                    "Branch litres sheet is missing required columns.",
-                    new SourceReference(sheet.SourceFile, sheet.SheetName, sheet.HeaderRowNumber == 0 ? null : sheet.HeaderRowNumber)));
-            }
+            rowCount++;
+            ParseRow(row, period, branchAliasResolver, weakColumns, entries, issues);
         }
+
+        continue;
+    }
+
+    if (columns.HasMinimumRequiredColumns && sheet.Rows.Count > 0)
+    {
+        foreach (var row in sheet.Rows)
+        {
+            if (ShouldSilentlySkipBranchLitresRow(row, columns))
+            {
+                continue;
+            }
+
+            rowCount++;
+            ParseRow(row, period, branchAliasResolver, columns, entries, issues);
+        }
+
+        continue;
+    }
+
+    if (!columns.HasMinimumRequiredColumns || sheet.Rows.Count == 0)
+    {
+        issues.Add(new BranchLitresParseIssue(
+            ValidationSeverity.Error,
+            MissingRequiredColumnsReasonCode,
+            "Branch litres sheet is missing required columns.",
+            new SourceReference(sheet.SourceFile, sheet.SheetName, sheet.HeaderRowNumber == 0 ? null : sheet.HeaderRowNumber)));
+    }
+}
 
         return BranchLitresParseResult.From(
             entries,

@@ -90,8 +90,8 @@ public class BranchAliasResolverTests
 
         var exception = Assert.Throws<ArgumentException>(() => new BranchAliasResolver([branch], [invalidAlias]));
 
-        Assert.Contains(BranchAliasResolver.InvalidBranchAliasReasonCode, BranchAliasResolutionResult.Failed("Rotorua", BranchAliasResolver.InvalidBranchAliasReasonCode).ReasonCode);
         Assert.Contains("missing canonical branch ID", exception.Message);
+        Assert.Contains("ROTORUA", exception.Message);
     }
 
     [Fact]

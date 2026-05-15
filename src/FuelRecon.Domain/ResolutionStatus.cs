@@ -2,11 +2,14 @@ namespace FuelRecon.Domain;
 
 /// <summary>
 /// User resolution state for an exception or review item.
+/// Stored separately from the original system reconciliation status.
 /// </summary>
 public enum ResolutionStatus
 {
-    None = 0,
-    Open = 1,
+    Unresolved = 0,
+    InReview = 1,
     Resolved = 2,
-    Deferred = 3,
+    ManuallyLinked = 3,
+    ApprovedWithException = 4,
+    ExcludedByRule = 5,
 }

@@ -155,13 +155,7 @@ public class SqliteSchemaTests
         var connection = new SqliteConnection("Data Source=:memory:");
         connection.Open();
 
-        using var pragmaCommand = connection.CreateCommand();
-        pragmaCommand.CommandText = "PRAGMA foreign_keys = ON;";
-        pragmaCommand.ExecuteNonQuery();
-
-        using var schemaCommand = connection.CreateCommand();
-        schemaCommand.CommandText = SqliteSchema.InitialSchema;
-        schemaCommand.ExecuteNonQuery();
+        SqliteSchemaMigrator.ApplyInitialSchema(connection);
 
         return connection;
     }

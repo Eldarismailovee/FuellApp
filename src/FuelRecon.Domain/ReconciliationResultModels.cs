@@ -14,7 +14,7 @@ public sealed record ReconciliationRun
         string createdBy,
         IEnumerable<FileChecksum> inputFileChecksums,
         string? settingsSnapshotId = null,
-        string? status = null,
+        ReconciliationRunStatus status = ReconciliationRunStatus.Created,
         DateTimeOffset? completedAtUtc = null,
         DateTimeOffset? failedAtUtc = null,
         string? failureReasonCode = null,
@@ -54,7 +54,7 @@ public sealed record ReconciliationRun
         CreatedBy = createdBy.Trim();
         InputFileChecksums = ReconciliationModelHelpers.ToReadOnlyList(inputFileChecksums, nameof(inputFileChecksums));
         SettingsSnapshotId = ReconciliationModelHelpers.TrimToNull(settingsSnapshotId);
-        Status = ReconciliationModelHelpers.TrimToNull(status) ?? "Created";
+        Status = status;
         CompletedAtUtc = completedAtUtc;
         FailedAtUtc = failedAtUtc;
         FailureReasonCode = ReconciliationModelHelpers.TrimToNull(failureReasonCode);
@@ -63,6 +63,8 @@ public sealed record ReconciliationRun
         ReviewRequiredCount = reviewRequiredCount;
         EstimatedRecoveryTotal = estimatedRecoveryTotal;
     }
+
+    
 
     public Guid Id { get; }
 
@@ -76,7 +78,7 @@ public sealed record ReconciliationRun
 
     public string? SettingsSnapshotId { get; }
 
-    public string Status { get; }
+    public ReconciliationRunStatus Status { get; }
 
     public DateTimeOffset? CompletedAtUtc { get; }
 
@@ -104,7 +106,7 @@ public sealed record MatchCandidate
 {
     public MatchCandidate(
         Guid id,
-        string candidateType,
+        MatchCandidateType candidateType,
         Guid sourceId,
         ConfidenceBucket confidenceBucket,
         IEnumerable<string>? matchedFields = null,
@@ -122,13 +124,8 @@ public sealed record MatchCandidate
             throw new ArgumentException("Match candidate source ID cannot be empty.", nameof(sourceId));
         }
 
-        if (string.IsNullOrWhiteSpace(candidateType))
-        {
-            throw new ArgumentException("Candidate type cannot be empty.", nameof(candidateType));
-        }
-
         Id = id;
-        CandidateType = candidateType.Trim();
+        CandidateType = candidateType;
         SourceId = sourceId;
         ConfidenceBucket = confidenceBucket;
         MatchedFields = ReconciliationModelHelpers.NormaliseStrings(matchedFields);
@@ -139,7 +136,7 @@ public sealed record MatchCandidate
 
     public Guid Id { get; }
 
-    public string CandidateType { get; }
+    public MatchCandidateType CandidateType { get; }
 
     public Guid SourceId { get; }
 

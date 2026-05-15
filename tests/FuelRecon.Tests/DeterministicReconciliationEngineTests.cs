@@ -79,7 +79,7 @@ public class DeterministicReconciliationEngineTests
         Assert.Equal(ReconciliationStatus.DuplicatePossible, item.SystemStatus);
         Assert.Contains("DuplicatePossible", item.ReasonCodes);
         Assert.Contains("MultipleCarsCandidates", item.ReasonCodes);
-        Assert.Equal(2, item.MatchCandidates.Count(candidate => candidate.CandidateType == MatchCandidateType.CarsBillingEntry.ToString()));
+        Assert.Equal(2, item.MatchCandidates.Count(candidate => candidate.CandidateType == MatchCandidateType.CarsBillingEntry));
     }
 
     [Fact]
@@ -108,7 +108,7 @@ public class DeterministicReconciliationEngineTests
         var item = Assert.Single(result.Items);
         Assert.Equal(supplier.Id, item.SupplierTransactionId);
         Assert.Equal(supplier.SourceReference, item.SupplierSourceReference);
-        Assert.Contains(item.MatchCandidates, candidate => candidate.CandidateType == MatchCandidateType.SupplierTransaction.ToString());
+        Assert.Contains(item.MatchCandidates, candidate => candidate.CandidateType == MatchCandidateType.SupplierTransaction);
     }
 
     [Fact]

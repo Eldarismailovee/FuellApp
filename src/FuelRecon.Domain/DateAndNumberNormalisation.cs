@@ -135,7 +135,8 @@ public static class DateNormaliser
 
         try
         {
-            var dateTime = DateTime.FromOADate((double)serialDate);
+            var baseDate = new DateTime(1899, 12, 30);
+            var dateTime = baseDate.AddDays((double)serialDate);
             return DateNormalisationResult.Valid(rawValue, DateOnly.FromDateTime(dateTime));
         }
         catch (ArgumentException)
@@ -309,7 +310,7 @@ internal static class NumericTextParser
         var decimalText = ToInvariantDecimalText(cleanedValue);
         if (decimalText is null)
         {
-            return Failure(failureReasonCode, AmbiguousNumericFormatReasonCode());
+            return Failure(failureReasonCode, "AmbiguousNumericFormat");
         }
 
         if (!decimal.TryParse(decimalText, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var value))
@@ -409,5 +410,4 @@ internal static class NumericTextParser
     private static NumericParseResult Failure(string failureReasonCode, string? reasonCode) =>
         new(Success: false, Value: 0, ReasonCode: reasonCode ?? failureReasonCode);
 
-    private static string AmbiguousNumericFormatReasonCode() => "AmbiguousNumericFormat";
 }

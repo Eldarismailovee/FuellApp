@@ -54,6 +54,8 @@ public class ExcelRealSampleParserSmokeTests
                 new BranchAlias("Hertz Taupo", taupo.Id),
                 new BranchAlias("Caltex Kerikeri", kerikeri.Id),
                 new BranchAlias("Caltex Whangarei", whangarei.Id),
+                new BranchAlias("Kerikeri", kerikeri.Id),
+                new BranchAlias("Whangarei", whangarei.Id),
             ]);
     }
 }

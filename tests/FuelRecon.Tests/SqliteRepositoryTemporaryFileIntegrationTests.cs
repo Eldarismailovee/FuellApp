@@ -85,7 +85,7 @@ public class SqliteRepositoryTemporaryFileIntegrationTests
             new DateTimeOffset(2026, 5, 15, 9, 0, 0, TimeSpan.Zero),
             "arina",
             [new FileChecksum("SHA256", "run-checksum")],
-            status: "Completed",
+            status: ReconciliationRunStatus.Completed,
             completedAtUtc: new DateTimeOffset(2026, 5, 15, 9, 1, 0, TimeSpan.Zero),
             totalItemCount: 2,
             matchedItemCount: 1,
@@ -103,7 +103,7 @@ public class SqliteRepositoryTemporaryFileIntegrationTests
 
         Assert.NotNull(loadedRun);
         Assert.Equal(run.Id, loadedRun.Id);
-        Assert.Equal("Completed", loadedRun.Status);
+        Assert.Equal(ReconciliationRunStatus.Completed, loadedRun.Status);
         Assert.Equal(2, loadedRun.TotalItemCount);
         Assert.Single(loadedRun.InputFileChecksums);
         Assert.Equal("run-checksum", loadedRun.InputFileChecksums[0].Value);
@@ -189,7 +189,7 @@ public class SqliteRepositoryTemporaryFileIntegrationTests
             runId,
             Period,
             status,
-            status == ReconciliationStatus.Matched ? ResolutionStatus.Resolved : ResolutionStatus.Open,
+            status == ReconciliationStatus.Matched ? ResolutionStatus.Resolved : ResolutionStatus.Unresolved,
             ConfidenceBucket.High,
             status == ReconciliationStatus.Matched ? ["MatchedByRA"] : ["Unbilled"],
             new CanonicalBranchId("TAUPO"),

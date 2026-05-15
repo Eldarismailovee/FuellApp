@@ -125,7 +125,7 @@ public sealed class SqliteReconciliationRunRepository(SqliteConnectionFactory co
             reader.GetString(3),
             ReconciliationJson.FromChecksumJson(reader.GetString(6)),
             reader.GetNullableString(5),
-            reader.GetString(4),
+            Enum.Parse<ReconciliationRunStatus>(reader.GetString(4)),
             reader.GetNullableDateTimeOffset(7),
             reader.GetNullableDateTimeOffset(8),
             reader.GetNullableString(9),
@@ -555,7 +555,7 @@ internal static class ReconciliationJson
     private static MatchCandidate FromDto(MatchCandidateDto dto) =>
         new(
             dto.Id,
-            dto.CandidateType,
+            Enum.Parse<MatchCandidateType>(dto.CandidateType),
             dto.SourceId,
             Enum.Parse<ConfidenceBucket>(dto.ConfidenceBucket),
             dto.MatchedFields,

@@ -118,8 +118,18 @@ static BranchAliasResolver CreateDefaultBranchAliasResolver()
             new BranchAlias("Mobil Taupo", taupo.Id),
             new BranchAlias("Mobile - Taupo", taupo.Id),
             new BranchAlias("Hertz Taupo", taupo.Id),
+            new BranchAlias("HERTZ TAUPO 1", taupo.Id),
+            new BranchAlias("HERTZ TAUPO 2", taupo.Id),
+            new BranchAlias("TAUPO 1", taupo.Id),
+            new BranchAlias("TAUPO 2", taupo.Id),
+            new BranchAlias("HERTZ BOP", taupo.Id),
+
+            new BranchAlias("Kerikeri", kerikeri.Id),
             new BranchAlias("Caltex Kerikeri", kerikeri.Id),
+
+            new BranchAlias("Whangarei", whangarei.Id),
             new BranchAlias("Caltex Whangarei", whangarei.Id),
+
             new BranchAlias("Caltex Te Ngae", rotorua.Id),
             new BranchAlias("Rotorua", rotorua.Id),
             new BranchAlias("Z Hewletts Rd", mtMaunganui.Id),

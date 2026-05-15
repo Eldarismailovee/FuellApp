@@ -46,7 +46,7 @@ public class SqliteReconciliationRepositoriesTests
         Assert.Equal(run.CreatedAtUtc, loaded.CreatedAtUtc);
         Assert.Equal(run.CreatedBy, loaded.CreatedBy);
         Assert.Equal(run.SettingsSnapshotId, loaded.SettingsSnapshotId);
-        Assert.Equal("Completed", loaded.Status);
+        Assert.Equal(ReconciliationRunStatus.Completed, loaded.Status);
         Assert.Equal(run.CompletedAtUtc, loaded.CompletedAtUtc);
         Assert.Equal(2, loaded.InputFileChecksums.Count);
         Assert.Equal("supplier", loaded.InputFileChecksums[0].Value);
@@ -76,7 +76,7 @@ public class SqliteReconciliationRepositoriesTests
         Assert.Equal(run.Id, loaded.RunId);
         Assert.Equal("TAUPO", loaded.BranchId?.Value);
         Assert.Equal(ReconciliationStatus.MissingRA, loaded.SystemStatus);
-        Assert.Equal(ResolutionStatus.Open, loaded.ResolutionStatus);
+        Assert.Equal(ResolutionStatus.Unresolved, loaded.ResolutionStatus);
         Assert.Equal(ReconciliationStatus.ReviewRequired, loaded.FinalStatus);
         Assert.Equal(["MissingRA", "LowConfidenceMatch"], loaded.ReasonCodes);
         Assert.Equal("Needs review", loaded.HumanReadableReason);
@@ -85,7 +85,7 @@ public class SqliteReconciliationRepositoriesTests
         Assert.Equal("supplier.pdf", loaded.SupplierSourceReference?.SourceFile);
         Assert.Equal(3, loaded.SupplierSourceReference?.PageNumber);
         Assert.Single(loaded.MatchCandidates);
-        Assert.Equal("CarsBillingEntry", loaded.MatchCandidates[0].CandidateType);
+        Assert.Equal(MatchCandidateType.CarsBillingEntry, loaded.MatchCandidates[0].CandidateType);
         Assert.Equal(["RA"], loaded.MatchCandidates[0].MissingFields);
         Assert.Single(items);
     }
@@ -309,7 +309,7 @@ public class SqliteReconciliationRepositoriesTests
             "arina",
             [new FileChecksum("SHA256", "supplier"), new FileChecksum("SHA256", "branch")],
             settingsSnapshotId,
-            "Completed",
+            ReconciliationRunStatus.Completed,
             completedAtUtc: new DateTimeOffset(2026, 5, 15, 2, 5, 0, TimeSpan.Zero),
             totalItemCount: 10,
             matchedItemCount: 7,
@@ -323,7 +323,7 @@ public class SqliteReconciliationRepositoriesTests
     {
         var candidate = new MatchCandidate(
             Guid.Parse("b7fd074b-90f2-4b68-8000-000000000012"),
-            "CarsBillingEntry",
+            MatchCandidateType.CarsBillingEntry,
             Guid.Parse("b7fd074b-90f2-4b68-8000-000000000013"),
             ConfidenceBucket.Low,
             matchedFields: ["Rego"],
@@ -336,7 +336,7 @@ public class SqliteReconciliationRepositoriesTests
             run.Id,
             run.Period,
             ReconciliationStatus.MissingRA,
-            ResolutionStatus.Open,
+            ResolutionStatus.Unresolved,
             ConfidenceBucket.Low,
             ["MissingRA", "LowConfidenceMatch"],
             new CanonicalBranchId("TAUPO"),

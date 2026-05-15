@@ -89,7 +89,8 @@ public class CoreValueObjectsTests
     }
 
     [Theory]
-    [InlineData(" RA-123.0 ", "RA1230")]
+    [InlineData(" RA-123.0 ", "RA123")]
+    [InlineData("1234567.0", "1234567")]
     [InlineData("ab 12-34", "AB1234")]
     [InlineData("A/B-42", "A/B42")]
     public void RentalAgreementNumber_preserves_raw_value_and_normalises_conservatively(string rawValue, string expectedNormalised)

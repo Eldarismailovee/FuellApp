@@ -99,22 +99,22 @@ public readonly record struct CanonicalBranchId
 /// <summary>
 /// Vehicle registration preserving both the raw source value and deterministic normalised value.
 /// </summary>
+/// <summary>
+/// Vehicle registration preserving both the raw source value and deterministic normalised value.
+/// </summary>
 public sealed record Rego
 {
     public Rego(string rawValue)
     {
-        if (string.IsNullOrWhiteSpace(rawValue))
-        {
-            throw new ArgumentException("Rego cannot be empty.", nameof(rawValue));
-        }
+        var result = RegoNormaliser.Normalise(rawValue);
 
-        RawValue = rawValue;
-        NormalisedValue = Normalise(rawValue);
-
-        if (NormalisedValue.Length == 0)
+        if (!result.Success || result.NormalisedValue is null)
         {
             throw new ArgumentException("Rego must contain at least one non-formatting character.", nameof(rawValue));
         }
+
+        RawValue = rawValue;
+        NormalisedValue = result.NormalisedValue;
     }
 
     public string RawValue { get; }
@@ -123,15 +123,14 @@ public sealed record Rego
 
     public static string Normalise(string value)
     {
-        if (value is null)
+        var result = RegoNormaliser.Normalise(value);
+
+        if (!result.Success || result.NormalisedValue is null)
         {
-            throw new ArgumentNullException(nameof(value));
+            throw new ArgumentException("Rego must contain at least one non-formatting character.", nameof(value));
         }
 
-        return new string(value
-            .Where(character => !char.IsWhiteSpace(character) && character != '-')
-            .Select(char.ToUpperInvariant)
-            .ToArray());
+        return result.NormalisedValue;
     }
 
     public override string ToString() => NormalisedValue;
@@ -163,15 +162,23 @@ public sealed record RentalAgreementNumber
     public string NormalisedValue { get; }
 
     public static string Normalise(string value)
-    {
+    {   
         if (value is null)
         {
             throw new ArgumentNullException(nameof(value));
         }
 
-        return new string(value
-            .Trim()
-            .Where(character => !char.IsWhiteSpace(character) && character is not '-' and not '.')
+        var trimmed = value.Trim();
+
+        // Common Excel artefact: numeric RA values may arrive as "1234567.0".
+        // Remove the trailing decimal suffix only when it is exactly ".0".
+        if (trimmed.EndsWith(".0", StringComparison.Ordinal))
+        {
+            trimmed = trimmed[..^2];
+        }
+
+        return new string(trimmed
+            .Where(character => !char.IsWhiteSpace(character) && character != '-')
             .Select(char.ToUpperInvariant)
             .ToArray());
     }
