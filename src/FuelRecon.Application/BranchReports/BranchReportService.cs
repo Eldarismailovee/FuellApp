@@ -11,6 +11,15 @@ public interface IBranchReportService
     /// <exception cref="ArgumentNullException"><paramref name="result"/> is null.</exception>
     /// <exception cref="ArgumentException">No <see cref="BranchSummary"/> exists for <paramref name="branchId"/>.</exception>
     BranchReportReadModel Build(ReconciliationEngineResult result, CanonicalBranchId branchId);
+
+    /// <summary>
+    /// Builds the same read model shape from persisted run/items plus a caller-supplied branch summary (for example totals aligned with a stored branch report version).
+    /// </summary>
+    BranchReportReadModel BuildFromPersisted(
+        ReconciliationRun run,
+        CanonicalBranchId branchId,
+        BranchSummary branchSummary,
+        IReadOnlyList<ReconciliationItem> runItems);
 }
 
 public sealed class BranchReportService : IBranchReportService
@@ -27,7 +36,39 @@ public sealed class BranchReportService : IBranchReportService
             throw new ArgumentException("Branch summary run id or period does not match reconciliation run.", nameof(result));
         }
 
-        var branchItems = result.Items
+        return BuildCore(result.Run, branchId, summary, result.Items);
+    }
+
+    public BranchReportReadModel BuildFromPersisted(
+        ReconciliationRun run,
+        CanonicalBranchId branchId,
+        BranchSummary branchSummary,
+        IReadOnlyList<ReconciliationItem> runItems)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+        ArgumentNullException.ThrowIfNull(branchSummary);
+        ArgumentNullException.ThrowIfNull(runItems);
+
+        if (branchSummary.BranchId.Value != branchId.Value)
+        {
+            throw new ArgumentException("Branch summary branch does not match requested branch.", nameof(branchId));
+        }
+
+        if (branchSummary.RunId != run.Id || branchSummary.Period != run.Period)
+        {
+            throw new ArgumentException("Branch summary run id or period does not match reconciliation run.", nameof(branchSummary));
+        }
+
+        return BuildCore(run, branchId, branchSummary, runItems);
+    }
+
+    private static BranchReportReadModel BuildCore(
+        ReconciliationRun run,
+        CanonicalBranchId branchId,
+        BranchSummary summary,
+        IReadOnlyList<ReconciliationItem> runItems)
+    {
+        var branchItems = runItems
             .Where(item => item.BranchId?.Value == branchId.Value)
             .OrderBy(item => item.Id.ToString("D"), StringComparer.Ordinal)
             .ToArray();
@@ -60,8 +101,8 @@ public sealed class BranchReportService : IBranchReportService
                 or ReconciliationStatus.DuplicatePossible);
 
         return new BranchReportReadModel(
-            result.Run.Period,
-            result.Run.Id,
+            run.Period,
+            run.Id,
             branchId,
             summary,
             countsByStatus,

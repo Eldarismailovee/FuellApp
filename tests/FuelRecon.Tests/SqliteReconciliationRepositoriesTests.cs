@@ -1,8 +1,13 @@
 using FuelRecon.Application.BranchReports;
+using FuelRecon.Application.Pdf.Export;
+using FuelRecon.Application.Pdf.Templates;
 using FuelRecon.Application.Persistence;
 using FuelRecon.Domain;
+using FuelRecon.Infrastructure.Pdf;
 using FuelRecon.Infrastructure.Persistence;
 using Microsoft.Data.Sqlite;
+using System.Text;
+using UglyToad.PdfPig;
 
 namespace FuelRecon.Tests;
 
@@ -428,6 +433,136 @@ public class SqliteReconciliationRepositoriesTests
         Assert.Equal(BranchReportAuditReasonCodes.Approved, audits[0].ReasonCode);
     }
 
+    [Fact]
+    public void ExportBranchReportPdfUseCase_sqlite_writes_pdf_and_export_history_row()
+    {
+        using var database = RepositoryTestDatabase.Create();
+        var run = SaveRun(database);
+        var summary = CreateTaupoBranchSummary(run);
+        var report = SaveReport(database, run, summary);
+        var itemsRepo = new SqliteReconciliationItemRepository(database.ConnectionFactory);
+        itemsRepo.Save(CreateItem(run));
+
+        var approvalsRepo = new SqliteBranchReportApprovalRepository(database.ConnectionFactory);
+        approvalsRepo.Save(
+            new BranchReportApprovalRecord(
+                Guid.Parse("a7fd074b-90f2-4b68-8000-000000000091"),
+                report.Id,
+                run.Id,
+                new DateTimeOffset(2026, 5, 20, 8, 0, 0, TimeSpan.Zero),
+                "approver",
+                "{}",
+                "Looks consistent."));
+
+        var branchRepo = new SqliteBranchReportRepository(database.ConnectionFactory);
+        var runsRepo = new SqliteReconciliationRunRepository(database.ConnectionFactory);
+        var exportRepo = new SqlitePdfExportRepository(database.ConnectionFactory);
+
+        var tempDir = Path.Combine(AppContext.BaseDirectory, $"FuelRecon-pdf-smoke-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var useCase = new ExportBranchReportPdfUseCase(
+                InMemoryPdfTemplateService.CreateDefault(),
+                branchRepo,
+                runsRepo,
+                itemsRepo,
+                approvalsRepo,
+                exportRepo,
+                new BranchReportService(),
+                new PdfSharpBranchReportPdfRenderer());
+
+            var exportedAt = new DateTimeOffset(2026, 5, 20, 10, 0, 0, TimeSpan.Zero);
+            var response = useCase.Execute(new ExportBranchReportPdfRequest(report.Id, "export-user", exportedAt, tempDir));
+
+            Assert.Equal(PdfExportStatus.Succeeded, response.Status);
+            Assert.NotNull(response.FilePath);
+            Assert.True(File.Exists(response.FilePath));
+
+            var pdfBytes = File.ReadAllBytes(response.FilePath);
+            Assert.Equal("%PDF-", Encoding.ASCII.GetString(pdfBytes.AsSpan(0, 5)));
+
+            using var pdf = PdfDocument.Open(new MemoryStream(pdfBytes));
+            var text = string.Join(' ', pdf.GetPages().SelectMany(page => page.GetWords()).Select(word => word.Text));
+            Assert.Contains("TAUPO", text, StringComparison.Ordinal);
+            Assert.Contains(run.Id.ToString("D"), text, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("100.00", text, StringComparison.Ordinal);
+            Assert.Contains("Prepared", text, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("arina", text, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Approved", text, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("approver", text, StringComparison.OrdinalIgnoreCase);
+
+            var exports = exportRepo.ListByBranchReport(report.Id);
+            Assert.Single(exports);
+            Assert.Equal(PdfExportStatus.Succeeded, exports[0].Status);
+            Assert.Equal(PdfTemplateDefaults.ActiveBranchReportTemplateKey, exports[0].TemplateName);
+            Assert.Equal(PdfTemplateDefaults.BranchReportTemplateVersion, exports[0].TemplateVersion);
+            Assert.Equal(response.ExportId, exports[0].Id);
+        }
+        finally
+        {
+            TryDeleteDirectory(tempDir);
+        }
+    }
+
+    [Fact]
+    public void ExportBranchReportPdfUseCase_sqlite_records_TemplateNotFound_without_pdf_file()
+    {
+        using var database = RepositoryTestDatabase.Create();
+        var run = SaveRun(database);
+        var summary = CreateTaupoBranchSummary(run);
+        var report = SaveReport(database, run, summary);
+
+        var branchRepo = new SqliteBranchReportRepository(database.ConnectionFactory);
+        var runsRepo = new SqliteReconciliationRunRepository(database.ConnectionFactory);
+        var itemsRepo = new SqliteReconciliationItemRepository(database.ConnectionFactory);
+        var approvalsRepo = new SqliteBranchReportApprovalRepository(database.ConnectionFactory);
+        var exportRepo = new SqlitePdfExportRepository(database.ConnectionFactory);
+
+        var missingCatalogTemplateService = new InMemoryPdfTemplateService(
+            PdfTemplateDefaults.ActiveBranchReportTemplateKey,
+            new Dictionary<string, PdfTemplateConfiguration>(StringComparer.Ordinal));
+
+        var tempDir = Path.Combine(AppContext.BaseDirectory, $"FuelRecon-pdf-missing-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            var useCase = new ExportBranchReportPdfUseCase(
+                missingCatalogTemplateService,
+                branchRepo,
+                runsRepo,
+                itemsRepo,
+                approvalsRepo,
+                exportRepo,
+                new BranchReportService(),
+                new PdfSharpBranchReportPdfRenderer());
+
+            var response = useCase.Execute(
+                new ExportBranchReportPdfRequest(
+                    report.Id,
+                    "export-user",
+                    new DateTimeOffset(2026, 5, 20, 11, 0, 0, TimeSpan.Zero),
+                    tempDir));
+
+            Assert.Equal(PdfExportStatus.Failed, response.Status);
+            Assert.Equal(PdfTemplateErrorCategories.TemplateNotFound, response.ErrorCategory);
+            Assert.Null(response.FilePath);
+            Assert.Empty(Directory.GetFiles(tempDir));
+
+            var exports = exportRepo.ListByBranchReport(report.Id);
+            Assert.Single(exports);
+            Assert.Equal(PdfExportStatus.Failed, exports[0].Status);
+            Assert.Equal(PdfTemplateErrorCategories.TemplateNotFound, exports[0].ErrorCategory);
+            Assert.Null(exports[0].TemplateName);
+        }
+        finally
+        {
+            TryDeleteDirectory(tempDir);
+        }
+    }
+
     [Theory]
     [InlineData("ReconciliationRuns")]
     [InlineData("BranchReports")]
@@ -645,5 +780,20 @@ public class SqliteReconciliationRepositoriesTests
         }
 
         public void Dispose() => rootConnection.Dispose();
+    }
+
+    private static void TryDeleteDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                Directory.Delete(path, recursive: true);
+            }
+        }
+        catch
+        {
+            // Ignore cleanup failures on shared runners.
+        }
     }
 }

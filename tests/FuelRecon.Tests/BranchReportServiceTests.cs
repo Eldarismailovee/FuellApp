@@ -132,6 +132,29 @@ public class BranchReportServiceTests
         Assert.Throws<ArgumentException>((Action)(() => _service.Build(engineResult, Taupo)));
     }
 
+    [Fact]
+    public void BuildFromPersisted_matches_Build_when_inputs_are_equivalent()
+    {
+        var run = CreateRun();
+        var summaryTaupo = CreateSummary(Taupo, run.Id, reviewCount: 5);
+
+        var items = new[]
+        {
+            CreateItem(run.Id, "00000000-0000-0000-0000-000000000010", ReconciliationStatus.Matched, ResolutionStatus.Resolved, Taupo),
+            CreateItem(run.Id, "00000000-0000-0000-0000-000000000011", ReconciliationStatus.Unbilled, ResolutionStatus.Unresolved, Taupo),
+            CreateItem(run.Id, "00000000-0000-0000-0000-000000000012", ReconciliationStatus.Variance, ResolutionStatus.Unresolved, Taupo),
+        };
+
+        var engineResult = new ReconciliationEngineResult(run, items, [summaryTaupo]);
+        var fromEngine = _service.Build(engineResult, Taupo);
+        var fromPersisted = _service.BuildFromPersisted(run, Taupo, summaryTaupo, items);
+
+        Assert.Equal(fromEngine.MatchedItems.Select(i => i.Id), fromPersisted.MatchedItems.Select(i => i.Id));
+        Assert.Equal(fromEngine.ExceptionItems.Select(i => i.Id), fromPersisted.ExceptionItems.Select(i => i.Id));
+        Assert.Equal(fromEngine.UnresolvedItems.Count, fromPersisted.UnresolvedItems.Count);
+        Assert.Equal(fromEngine.CountsBySystemStatus.Select(c => c.Count), fromPersisted.CountsBySystemStatus.Select(c => c.Count));
+    }
+
     private static ReconciliationRun CreateRun() =>
         new(
             RunId,
