@@ -243,6 +243,66 @@ public class SqliteReconciliationRepositoriesTests
     }
 
     [Fact]
+    public void PdfExportRepository_round_trips_error_message_and_export_settings_snapshot()
+    {
+        using var database = RepositoryTestDatabase.Create();
+        var run = SaveRun(database);
+        var report = SaveReport(database, run);
+        var repository = new SqlitePdfExportRepository(database.ConnectionFactory);
+        var export = new PdfExportRecord(
+            Guid.Parse("c7fd074b-90f2-4b68-8000-000000000031"),
+            report.Id,
+            new DateTimeOffset(2026, 5, 15, 6, 0, 0, TimeSpan.Zero),
+            "arina",
+            PdfExportStatus.Failed,
+            errorCategory: "PdfWriteFailed",
+            errorMessage: " Disk full ",
+            exportSettingsSnapshot: " {\"schemaVersion\":\"1\",\"failureStage\":\"PdfWriteFailed\"} ");
+
+        repository.Save(export);
+
+        var loaded = repository.GetById(export.Id);
+
+        Assert.NotNull(loaded);
+        Assert.Equal("PdfWriteFailed", loaded.ErrorCategory);
+        Assert.Equal("Disk full", loaded.ErrorMessage);
+        Assert.Equal("{\"schemaVersion\":\"1\",\"failureStage\":\"PdfWriteFailed\"}", loaded.ExportSettingsSnapshot);
+    }
+
+    [Fact]
+    public void PdfExportRepository_lists_exports_newest_first_for_branch_report()
+    {
+        using var database = RepositoryTestDatabase.Create();
+        var run = SaveRun(database);
+        var report = SaveReport(database, run);
+        var repository = new SqlitePdfExportRepository(database.ConnectionFactory);
+        var older = new PdfExportRecord(
+            Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+            report.Id,
+            new DateTimeOffset(2026, 5, 10, 10, 0, 0, TimeSpan.Zero),
+            "u1",
+            PdfExportStatus.Failed,
+            errorCategory: "Old");
+
+        var newer = new PdfExportRecord(
+            Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+            report.Id,
+            new DateTimeOffset(2026, 5, 11, 10, 0, 0, TimeSpan.Zero),
+            "u2",
+            PdfExportStatus.Succeeded,
+            filePath: "/tmp/report.pdf");
+
+        repository.Save(older);
+        repository.Save(newer);
+
+        var exports = repository.ListByBranchReport(report.Id);
+
+        Assert.Equal(2, exports.Count);
+        Assert.Equal(newer.Id, exports[0].Id);
+        Assert.Equal(older.Id, exports[1].Id);
+    }
+
+    [Fact]
     public void AuditRepository_saves_and_retrieves_audit_records_by_entity()
     {
         using var database = RepositoryTestDatabase.Create();
@@ -499,6 +559,17 @@ public class SqliteReconciliationRepositoriesTests
             Assert.Equal(PdfTemplateDefaults.ActiveBranchReportTemplateKey, exports[0].TemplateName);
             Assert.Equal(PdfTemplateDefaults.BranchReportTemplateVersion, exports[0].TemplateVersion);
             Assert.Equal(response.ExportId, exports[0].Id);
+            Assert.NotNull(exports[0].ExportSettingsSnapshot);
+            Assert.Contains("\"exportOutcome\":\"Succeeded\"", exports[0].ExportSettingsSnapshot, StringComparison.Ordinal);
+            Assert.Contains(
+                PdfTemplateDefaults.ActiveBranchReportTemplateKey,
+                exports[0].ExportSettingsSnapshot,
+                StringComparison.Ordinal);
+
+            var history = new ListBranchReportPdfExportsUseCase(exportRepo).Execute(new ListBranchReportPdfExportsRequest(report.Id));
+            Assert.Single(history.Exports);
+            Assert.Equal(exports[0].Id, history.Exports[0].ExportId);
+            Assert.Equal(exports[0].ExportSettingsSnapshot, history.Exports[0].ExportSettingsSnapshotJson);
         }
         finally
         {
@@ -556,6 +627,9 @@ public class SqliteReconciliationRepositoriesTests
             Assert.Equal(PdfExportStatus.Failed, exports[0].Status);
             Assert.Equal(PdfTemplateErrorCategories.TemplateNotFound, exports[0].ErrorCategory);
             Assert.Null(exports[0].TemplateName);
+            Assert.Equal("Active PDF template configuration was not found.", exports[0].ErrorMessage);
+            Assert.NotNull(exports[0].ExportSettingsSnapshot);
+            Assert.Contains("\"failureStage\":\"TemplateNotFound\"", exports[0].ExportSettingsSnapshot, StringComparison.Ordinal);
         }
         finally
         {

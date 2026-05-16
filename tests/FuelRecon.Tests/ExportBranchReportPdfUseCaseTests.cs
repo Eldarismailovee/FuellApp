@@ -43,6 +43,9 @@ public class ExportBranchReportPdfUseCaseTests
             Assert.Single(exports.Saved);
             Assert.Equal(PdfTemplateErrorCategories.TemplateNotFound, exports.Saved[0].ErrorCategory);
             Assert.Null(exports.Saved[0].TemplateName);
+            Assert.Equal("Active PDF template configuration was not found.", exports.Saved[0].ErrorMessage);
+            Assert.NotNull(exports.Saved[0].ExportSettingsSnapshot);
+            Assert.Contains("\"failureStage\":\"TemplateNotFound\"", exports.Saved[0].ExportSettingsSnapshot, StringComparison.Ordinal);
         }
         finally
         {

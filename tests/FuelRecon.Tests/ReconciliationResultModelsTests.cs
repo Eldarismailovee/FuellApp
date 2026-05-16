@@ -292,6 +292,8 @@ public class ReconciliationResultModelsTests
             "approver",
             PdfExportStatus.Failed,
             errorCategory: " TemplateNotFound ",
+            errorMessage: " No template. ",
+            exportSettingsSnapshot: " {\"schemaVersion\":\"1\"} ",
             correlationId: new CorrelationId("export-failure-1"));
 
         Assert.Equal(PdfExportStatus.Failed, exportRecord.Status);
@@ -299,6 +301,8 @@ public class ReconciliationResultModelsTests
         Assert.Null(exportRecord.TemplateName);
         Assert.Null(exportRecord.TemplateVersion);
         Assert.Equal("TemplateNotFound", exportRecord.ErrorCategory);
+        Assert.Equal("No template.", exportRecord.ErrorMessage);
+        Assert.Equal("{\"schemaVersion\":\"1\"}", exportRecord.ExportSettingsSnapshot);
         Assert.Equal("export-failure-1", exportRecord.CorrelationId?.Value);
     }
 

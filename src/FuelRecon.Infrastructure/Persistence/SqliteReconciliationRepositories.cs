@@ -507,11 +507,11 @@ public sealed class SqlitePdfExportRepository(SqliteConnectionFactory connection
         command.CommandText = """
             INSERT INTO PdfExports (
                 Id, BranchReportId, ExportedAtUtc, ExportedBy, Status, FilePath, TemplateName,
-                TemplateVersion, ErrorCategory, CorrelationId
+                TemplateVersion, ErrorCategory, ErrorMessage, CorrelationId, ExportSettingsSnapshot
             )
             VALUES (
                 $id, $branchReportId, $exportedAtUtc, $exportedBy, $status, $filePath, $templateName,
-                $templateVersion, $errorCategory, $correlationId
+                $templateVersion, $errorCategory, $errorMessage, $correlationId, $exportSettingsSnapshot
             );
             """;
         command.Parameters.AddWithValue("$id", exportRecord.Id.ToString());
@@ -523,7 +523,9 @@ public sealed class SqlitePdfExportRepository(SqliteConnectionFactory connection
         command.Parameters.AddWithNullableValue("$templateName", exportRecord.TemplateName);
         command.Parameters.AddWithNullableValue("$templateVersion", exportRecord.TemplateVersion);
         command.Parameters.AddWithNullableValue("$errorCategory", exportRecord.ErrorCategory);
+        command.Parameters.AddWithNullableValue("$errorMessage", exportRecord.ErrorMessage);
         command.Parameters.AddWithNullableValue("$correlationId", exportRecord.CorrelationId?.Value);
+        command.Parameters.AddWithNullableValue("$exportSettingsSnapshot", exportRecord.ExportSettingsSnapshot);
         command.ExecuteNonQuery();
         transaction.Commit();
     }
@@ -542,7 +544,7 @@ public sealed class SqlitePdfExportRepository(SqliteConnectionFactory connection
     {
         using var connection = connectionFactory.OpenConnection();
         using var command = connection.CreateCommand();
-        command.CommandText = PdfExportSelectSql + " WHERE BranchReportId = $branchReportId ORDER BY ExportedAtUtc, Id;";
+        command.CommandText = PdfExportSelectSql + " WHERE BranchReportId = $branchReportId ORDER BY ExportedAtUtc DESC, Id DESC;";
         command.Parameters.AddWithValue("$branchReportId", branchReportId.ToString());
         using var reader = command.ExecuteReader();
         var exports = new List<PdfExportRecord>();
@@ -556,7 +558,7 @@ public sealed class SqlitePdfExportRepository(SqliteConnectionFactory connection
 
     private const string PdfExportSelectSql = """
         SELECT Id, BranchReportId, ExportedAtUtc, ExportedBy, Status, FilePath,
-               TemplateName, TemplateVersion, ErrorCategory, CorrelationId
+               TemplateName, TemplateVersion, ErrorCategory, ErrorMessage, CorrelationId, ExportSettingsSnapshot
         FROM PdfExports
         """;
 
@@ -571,7 +573,9 @@ public sealed class SqlitePdfExportRepository(SqliteConnectionFactory connection
             reader.GetNullableString(6),
             reader.GetNullableString(7),
             reader.GetNullableString(8),
-            reader.GetNullableString(9) is { } correlationId ? new CorrelationId(correlationId) : null);
+            reader.GetNullableString(9),
+            reader.GetNullableString(11),
+            reader.GetNullableString(10) is { } correlationId ? new CorrelationId(correlationId) : null);
 }
 
 public sealed class SqliteAuditRepository(SqliteConnectionFactory connectionFactory) : IAuditRepository

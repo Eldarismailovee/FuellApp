@@ -609,6 +609,8 @@ public sealed record PdfExportRecord
         string? templateName = null,
         string? templateVersion = null,
         string? errorCategory = null,
+        string? errorMessage = null,
+        string? exportSettingsSnapshot = null,
         CorrelationId? correlationId = null)
     {
         if (id == Guid.Empty)
@@ -635,6 +637,8 @@ public sealed record PdfExportRecord
         TemplateName = ReconciliationModelHelpers.TrimToNull(templateName);
         TemplateVersion = ReconciliationModelHelpers.TrimToNull(templateVersion);
         ErrorCategory = ReconciliationModelHelpers.TrimToNull(errorCategory);
+        ErrorMessage = ReconciliationModelHelpers.TrimToNull(errorMessage);
+        ExportSettingsSnapshot = ReconciliationModelHelpers.TrimToNull(exportSettingsSnapshot);
         CorrelationId = correlationId;
     }
 
@@ -655,6 +659,10 @@ public sealed record PdfExportRecord
     public string? TemplateVersion { get; }
 
     public string? ErrorCategory { get; }
+
+    public string? ErrorMessage { get; }
+
+    public string? ExportSettingsSnapshot { get; }
 
     public CorrelationId? CorrelationId { get; }
 }

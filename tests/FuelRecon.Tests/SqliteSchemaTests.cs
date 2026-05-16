@@ -93,6 +93,7 @@ public class SqliteSchemaTests
             "TemplateName",
             "TemplateVersion",
             "ErrorCategory",
+            "ErrorMessage",
             "CorrelationId",
             "ExportSettingsSnapshot");
     }

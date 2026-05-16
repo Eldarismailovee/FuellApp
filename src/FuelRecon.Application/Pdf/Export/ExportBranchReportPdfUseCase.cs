@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FuelRecon.Application.BranchReports;
 using FuelRecon.Application.Pdf.Templates;
 using FuelRecon.Application.Persistence;
@@ -35,6 +36,8 @@ public sealed class ExportBranchReportPdfUseCase(
     IBranchReportService branchReportService,
     IBranchReportPdfRenderer pdfRenderer) : IExportBranchReportPdfUseCase
 {
+    private static readonly JsonSerializerOptions ExportSnapshotJsonOptions = new() { WriteIndented = false };
+
     public ExportBranchReportPdfResponse Execute(ExportBranchReportPdfRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -48,7 +51,6 @@ public sealed class ExportBranchReportPdfUseCase(
         ArgumentException.ThrowIfNullOrWhiteSpace(request.OutputDirectory);
 
         var exportId = Guid.NewGuid();
-        var correlationId = request.CorrelationId;
 
         var templateResult = pdfTemplateService.GetActiveTemplate();
         if (templateResult is PdfTemplateNotFound notFound)
@@ -60,7 +62,9 @@ public sealed class ExportBranchReportPdfUseCase(
                 filePath: null,
                 templateName: null,
                 templateVersion: null,
-                errorCategory: notFound.ErrorCategory);
+                errorCategory: notFound.ErrorCategory,
+                errorMessage: "Active PDF template configuration was not found.",
+                SerializeSnapshot(BuildTemplateNotFoundSnapshot(request, notFound)));
 
             return new ExportBranchReportPdfResponse(
                 exportId,
@@ -84,7 +88,9 @@ public sealed class ExportBranchReportPdfUseCase(
                 filePath: null,
                 template.TemplateName,
                 template.TemplateVersion,
-                PdfBranchExportErrorCategories.BranchReportNotFound);
+                PdfBranchExportErrorCategories.BranchReportNotFound,
+                errorMessage: "Branch report version was not found.",
+                SerializeSnapshot(BuildFailureSnapshot(request, template, "BranchReportNotFound")));
 
             return FailedResponse(exportId, PdfBranchExportErrorCategories.BranchReportNotFound, template);
         }
@@ -99,7 +105,9 @@ public sealed class ExportBranchReportPdfUseCase(
                 filePath: null,
                 template.TemplateName,
                 template.TemplateVersion,
-                PdfBranchExportErrorCategories.BranchReportMetricsNotFound);
+                PdfBranchExportErrorCategories.BranchReportMetricsNotFound,
+                errorMessage: "Persisted branch report metrics were not found.",
+                SerializeSnapshot(BuildFailureSnapshot(request, template, "BranchReportMetricsNotFound")));
 
             return FailedResponse(exportId, PdfBranchExportErrorCategories.BranchReportMetricsNotFound, template);
         }
@@ -114,7 +122,9 @@ public sealed class ExportBranchReportPdfUseCase(
                 filePath: null,
                 template.TemplateName,
                 template.TemplateVersion,
-                PdfBranchExportErrorCategories.ReconciliationRunNotFound);
+                PdfBranchExportErrorCategories.ReconciliationRunNotFound,
+                errorMessage: "Reconciliation run was not found.",
+                SerializeSnapshot(BuildFailureSnapshot(request, template, "ReconciliationRunNotFound")));
 
             return FailedResponse(exportId, PdfBranchExportErrorCategories.ReconciliationRunNotFound, template);
         }
@@ -155,7 +165,9 @@ public sealed class ExportBranchReportPdfUseCase(
                 filePath: null,
                 template.TemplateName,
                 template.TemplateVersion,
-                PdfBranchExportErrorCategories.PdfWriteFailed);
+                PdfBranchExportErrorCategories.PdfWriteFailed,
+                errorMessage: "Failed to write the PDF file.",
+                SerializeSnapshot(BuildFailureSnapshot(request, template, "PdfWriteFailed")));
 
             return FailedResponse(exportId, PdfBranchExportErrorCategories.PdfWriteFailed, template);
         }
@@ -167,7 +179,9 @@ public sealed class ExportBranchReportPdfUseCase(
             fullPath,
             template.TemplateName,
             template.TemplateVersion,
-            errorCategory: null);
+            errorCategory: null,
+            errorMessage: null,
+            SerializeSnapshot(BuildSuccessSnapshot(request, template)));
 
         return new ExportBranchReportPdfResponse(
             exportId,
@@ -200,7 +214,9 @@ public sealed class ExportBranchReportPdfUseCase(
         string? filePath,
         string? templateName,
         string? templateVersion,
-        string? errorCategory)
+        string? errorCategory,
+        string? errorMessage = null,
+        string? exportSettingsSnapshot = null)
     {
         pdfExportRepository.Save(
             new PdfExportRecord(
@@ -213,6 +229,8 @@ public sealed class ExportBranchReportPdfUseCase(
                 templateName,
                 templateVersion,
                 errorCategory,
+                errorMessage,
+                exportSettingsSnapshot,
                 request.CorrelationId));
     }
 
@@ -227,4 +245,48 @@ public sealed class ExportBranchReportPdfUseCase(
             errorCategory,
             template.TemplateName,
             template.TemplateVersion);
+
+    private static SortedDictionary<string, string?> BaseSnapshotFields(ExportBranchReportPdfRequest request) =>
+        new(StringComparer.Ordinal)
+        {
+            ["branchReportVersionId"] = request.BranchReportVersionId.ToString("D"),
+            ["outputDirectory"] = request.OutputDirectory,
+            ["schemaVersion"] = "1",
+        };
+
+    private static SortedDictionary<string, string?> BuildTemplateNotFoundSnapshot(
+        ExportBranchReportPdfRequest request,
+        PdfTemplateNotFound notFound)
+    {
+        var fields = BaseSnapshotFields(request);
+        fields["activeTemplateKey"] = notFound.ActiveTemplateKey;
+        fields["failureStage"] = "TemplateNotFound";
+        return fields;
+    }
+
+    private static SortedDictionary<string, string?> BuildFailureSnapshot(
+        ExportBranchReportPdfRequest request,
+        PdfTemplateConfiguration template,
+        string failureStage)
+    {
+        var fields = BaseSnapshotFields(request);
+        fields["failureStage"] = failureStage;
+        fields["templateName"] = template.TemplateName;
+        fields["templateVersion"] = template.TemplateVersion;
+        return fields;
+    }
+
+    private static SortedDictionary<string, string?> BuildSuccessSnapshot(
+        ExportBranchReportPdfRequest request,
+        PdfTemplateConfiguration template)
+    {
+        var fields = BaseSnapshotFields(request);
+        fields["exportOutcome"] = "Succeeded";
+        fields["templateName"] = template.TemplateName;
+        fields["templateVersion"] = template.TemplateVersion;
+        return fields;
+    }
+
+    private static string SerializeSnapshot(SortedDictionary<string, string?> fields) =>
+        JsonSerializer.Serialize(fields, ExportSnapshotJsonOptions);
 }
