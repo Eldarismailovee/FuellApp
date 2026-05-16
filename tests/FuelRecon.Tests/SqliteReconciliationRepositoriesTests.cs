@@ -543,15 +543,31 @@ public class SqliteReconciliationRepositoriesTests
             var pdfBytes = File.ReadAllBytes(response.FilePath);
             Assert.Equal("%PDF-", Encoding.ASCII.GetString(pdfBytes.AsSpan(0, 5)));
 
+            Assert.Contains(report.Id.ToString("D"), response.FilePath, StringComparison.OrdinalIgnoreCase);
+
             using var pdf = PdfDocument.Open(new MemoryStream(pdfBytes));
+            Assert.Equal("Fuel reconciliation branch report", pdf.Information.Title);
+
             var text = string.Join(' ', pdf.GetPages().SelectMany(page => page.GetWords()).Select(word => word.Text));
+            var compactPdfText = CompactWhitespace(text);
+
             Assert.Contains("TAUPO", text, StringComparison.Ordinal);
             Assert.Contains(run.Id.ToString("D"), text, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("100.00", text, StringComparison.Ordinal);
-            Assert.Contains("Prepared", text, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("arina", text, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("Approved", text, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("approver", text, StringComparison.OrdinalIgnoreCase);
+
+            Assert.Contains("Branch:TAUPO", compactPdfText, StringComparison.Ordinal);
+            Assert.Contains("Period:2026-04", compactPdfText, StringComparison.Ordinal);
+            Assert.Contains("Reportversion:1", compactPdfText, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains(
+                $"PDFtemplate:{PdfTemplateDefaults.ActiveBranchReportTemplateKey}(v{PdfTemplateDefaults.BranchReportTemplateVersion})",
+                compactPdfText,
+                StringComparison.OrdinalIgnoreCase);
+
+            Assert.Contains("2026-05-15T03:00:00", compactPdfText, StringComparison.Ordinal);
+            Assert.Contains("Preparedby:arina", compactPdfText, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("2026-05-20T08:00:00", compactPdfText, StringComparison.Ordinal);
+            Assert.Contains("Approvedby:approver", compactPdfText, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Approvalnote:Looksconsistent.", compactPdfText, StringComparison.OrdinalIgnoreCase);
 
             var exports = exportRepo.ListByBranchReport(report.Id);
             Assert.Single(exports);
@@ -630,6 +646,8 @@ public class SqliteReconciliationRepositoriesTests
             Assert.Equal("Active PDF template configuration was not found.", exports[0].ErrorMessage);
             Assert.NotNull(exports[0].ExportSettingsSnapshot);
             Assert.Contains("\"failureStage\":\"TemplateNotFound\"", exports[0].ExportSettingsSnapshot, StringComparison.Ordinal);
+            Assert.Contains($"\"branchReportVersionId\":\"{report.Id:D}\"", exports[0].ExportSettingsSnapshot, StringComparison.Ordinal);
+            Assert.Contains("\"schemaVersion\":\"1\"", exports[0].ExportSettingsSnapshot, StringComparison.Ordinal);
         }
         finally
         {
@@ -855,6 +873,9 @@ public class SqliteReconciliationRepositoriesTests
 
         public void Dispose() => rootConnection.Dispose();
     }
+
+    private static string CompactWhitespace(string value) =>
+        string.Concat(value.Where(c => !char.IsWhiteSpace(c)));
 
     private static void TryDeleteDirectory(string path)
     {
