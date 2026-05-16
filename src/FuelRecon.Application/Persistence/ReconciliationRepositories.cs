@@ -77,6 +77,21 @@ public interface IAuditRepository
     IReadOnlyList<AuditRecord> ListByEntity(AuditEntityType entityType, string entityId);
 }
 
+public interface IPeriodLifecycleRepository
+{
+    PeriodLifecycleRecord? Get(FuelPeriod period);
+
+    /// <summary>
+    /// Ensures a period row exists with lifecycle Draft when missing (matches import bootstrap semantics).
+    /// </summary>
+    void EnsurePeriod(FuelPeriod period, DateTimeOffset createdAtUtc);
+
+    /// <summary>
+    /// Updates mutable lifecycle columns for an existing period row.
+    /// </summary>
+    void Save(PeriodLifecycleRecord record);
+}
+
 public interface ISettingsSnapshotRepository
 {
     void Save(SettingsSnapshotRecord snapshot);

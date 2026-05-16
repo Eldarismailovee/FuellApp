@@ -92,4 +92,22 @@ public class CoreEnumsTests
     {
         Assert.Equal(3, Enum.GetValues<InputSlot>().Length);
     }
+
+    [Fact]
+    public void PeriodLifecycleStatus_covers_documented_period_workflow_states()
+    {
+        Assert.Equal(
+            [
+                nameof(PeriodLifecycleStatus.Draft),
+                nameof(PeriodLifecycleStatus.FilesImported),
+                nameof(PeriodLifecycleStatus.Validated),
+                nameof(PeriodLifecycleStatus.Reconciled),
+                nameof(PeriodLifecycleStatus.ReviewRequired),
+                nameof(PeriodLifecycleStatus.Reviewed),
+                nameof(PeriodLifecycleStatus.Approved),
+                nameof(PeriodLifecycleStatus.Closed),
+                nameof(PeriodLifecycleStatus.Reopened),
+            ],
+            Enum.GetNames<PeriodLifecycleStatus>());
+    }
 }
